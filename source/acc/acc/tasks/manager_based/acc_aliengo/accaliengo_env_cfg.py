@@ -61,9 +61,9 @@ class CommandsCfg:
         class Ranges:
             """Ranges for the commands."""
 
-            lin_vel_x: Tuple[float, float] = (-1.0, 1.0)
+            lin_vel_x: Tuple[float, float] = (-0.8, 0.8)
             lin_vel_y: Tuple[float, float] = (0.0, 0.0)
-            ang_vel_z: Tuple[float, float] = (0.0, 1.0)
+            ang_vel_z: Tuple[float, float] = (-1.0, 1.0)
             heading: Tuple[float, float] = (-math.pi, math.pi)
 
         # 命令范围
@@ -104,8 +104,8 @@ class CommandsCfg:
         @configclass
         class Ranges:
             """球坐标采样范围"""
-            radius: Tuple[float, float] = (0.4, 0.9)  # 径向距离 l (米)
-            pitch_angle: Tuple[float, float] = (-math.pi / 2.5, math.pi / 3)  # 俯仰角 p (弧度)
+            radius: Tuple[float, float] = (0.4, 0.7)  # 径向距离 l (米)
+            pitch_angle: Tuple[float, float] = (-1.0, 1.0)  # 俯仰角 p (弧度)
             yaw_angle: Tuple[float, float] = (-1.2, 1.2)  # 方位角 y (弧度)
             
         ranges: Ranges = Ranges()
@@ -214,12 +214,12 @@ class AccSceneCfg(InteractiveSceneCfg):
             ),
         ),
         
-        # 初始状态配置 - 按照VBC init_state配置
+        # 初始状态配置
         init_state=ArticulationCfg.InitialStateCfg(
-            pos=[0.0, 0.0, 0.5],  # VBC: 初始高度0.5米
+            pos=[0.0, 0.0, 0.45],
             rot=[1.0, 0.0, 0.0, 0.0],
             joint_pos={ 
-            'FL_hip_joint': 0.1,    # VBC: hip joints 0.1
+            'FL_hip_joint': 0.1,
             'FL_thigh_joint': 0.8,
             'FL_calf_joint': -1.5,
 
@@ -227,7 +227,7 @@ class AccSceneCfg(InteractiveSceneCfg):
             'RL_thigh_joint': 0.8,
             'RL_calf_joint': -1.5,
 
-            'FR_hip_joint': -0.1,   # VBC: hip joints -0.1
+            'FR_hip_joint': -0.1,
             'FR_thigh_joint': 0.8,
             'FR_calf_joint': -1.5,
 
@@ -235,7 +235,7 @@ class AccSceneCfg(InteractiveSceneCfg):
             'RR_thigh_joint': 0.8,
             'RR_calf_joint': -1.5,
             
-            'arm_joint1': 0.0,      # VBC: 机械臂关节名称使用arm_joint前缀
+            'arm_joint1': 0.0,
             'arm_joint2': 1.48,
             'arm_joint3': -0.63,
             'arm_joint4': -0.84,
@@ -469,7 +469,7 @@ class RewardsCfg:
     base_height_penalty = RewTerm(  # l2
         func=mdp.base_height_l2, 
         weight=-0.2,
-        params={"target_height": 0.4}  # VBC: Aliengo目标高度0.4米
+        params={"target_height": 0.36}  # VBC: Aliengo目标高度0.36米
     )
     # (7) Penalize torques
     torque_penalty = RewTerm(func=mdp.joint_torques_l2, weight=-0.0001)  # l2
@@ -551,7 +551,7 @@ class TerminationsCfg:
         func=mdp.root_height_below_minimum,
         params={
             "asset_cfg": SceneEntityCfg("robot"),
-            "minimum_height": 0.05,  # VBC: 最小高度0.05米
+            "minimum_height": 0.05,
         },
     )
     # (4) Base_height above maximum
@@ -571,7 +571,7 @@ class TerminationsCfg:
 @configclass
 class AccAliengoEnvCfg(ManagerBasedRLEnvCfg):
     # Scene settings
-    scene: AccSceneCfg = AccSceneCfg(num_envs=96, env_spacing=4.0)
+    scene: AccSceneCfg = AccSceneCfg(num_envs=6144, env_spacing=4.0)
     # Basic settings
     observations: ObservationsCfg = ObservationsCfg()
     actions: ActionsCfg = ActionsCfg()

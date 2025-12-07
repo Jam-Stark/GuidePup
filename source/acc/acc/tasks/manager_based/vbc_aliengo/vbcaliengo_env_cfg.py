@@ -827,7 +827,7 @@ class EventCfg:
     
     # ========== 间隔触发事件 (interval mode) ==========
     
-    # 7. 推动机器人 - 每8秒施加一次随机速度（使用官方API）
+    # 7. 推动机器人 - 每8秒施加一次随机速度
     push_robot = EventTerm(
         func=mdp.push_by_setting_velocity,
         mode="interval",
