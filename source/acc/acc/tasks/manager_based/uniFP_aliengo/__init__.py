@@ -13,11 +13,11 @@ from . import agents
 
 
 gym.register(
-    id="Template-VbcAliengo-v0",
+    id="Template-UniFPAliengo-v0",
     entry_point="isaaclab.envs:ManagerBasedRLEnv",
     disable_env_checker=True,
     kwargs={
-        "env_cfg_entry_point": f"{__name__}.vbcaliengo_env_cfg:VbcAliengoEnvCfg",
+        "env_cfg_entry_point": f"{__name__}.unifpaliengo_env_cfg:UniFPAliengoEnvCfg",
         "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:PPORunnerCfg",
         "skrl_cfg_entry_point": f"{agents.__name__}:skrl_ppo_cfg.yaml",
     },

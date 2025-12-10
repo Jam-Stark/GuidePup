@@ -125,7 +125,7 @@ class CommandsCfg:
         sphere_center_z: float = 0.6  # 世界坐标系固定Z高度
         
         # 时间配置
-        move_time_range: Tuple[float, float] = (1.0, 2.0)  # 运动时长
+        move_time_range: Tuple[float, float] = (1.5, 3.0)  # 运动时长
         hold_time_range: Tuple[float, float] = (0.5, 1.2)  # 保持时长
         
         max_collision_attempts: int = 20
@@ -184,7 +184,7 @@ class CommandsCfg:
 
 
 @configclass
-class VbcTerrainCfg(TerrainGeneratorCfg):
+class UniFPTerrainCfg(TerrainGeneratorCfg):
     """
     VBC专用地形配置 - 实现"rough flat"粗糙平地
     
@@ -220,7 +220,7 @@ class VbcTerrainCfg(TerrainGeneratorCfg):
 
 
 @configclass
-class VbcSceneCfg(InteractiveSceneCfg):
+class UniFPSceneCfg(InteractiveSceneCfg):
     """Configuration for a cart-pole scene."""
     # 关键：禁用物理属性复制，以支持域随机化
     replicate_physics = False
@@ -231,7 +231,7 @@ class VbcSceneCfg(InteractiveSceneCfg):
     """terrain = TerrainImporterCfg(
         prim_path="/World/ground",
         terrain_type="generator",
-        terrain_generator=VbcTerrainCfg(),
+        terrain_generator=UniFPTerrainCfg(),
         max_init_terrain_level=5,
         collision_group=-1,
         physics_material=sim_utils.RigidBodyMaterialCfg(
@@ -334,7 +334,7 @@ class VbcSceneCfg(InteractiveSceneCfg):
         ),
         
         # 软关节限制因子
-        soft_joint_pos_limit_factor=1.0,
+        soft_joint_pos_limit_factor=0.8,
         # 执行器配置
         actuators={
             "legs": ImplicitActuatorCfg(
@@ -390,23 +390,23 @@ class VbcSceneCfg(InteractiveSceneCfg):
         track_pose=False,  # 不需要跟踪姿态（性能优化）
     )
     
-    # 非法接触检测 penalize_contacts_on = ["thigh", "calf"]
+    # 非法接触检测 penalize_contacts_on = ["thigh", "calf","trunk"]
     penalize_contacts: ContactSensorCfg = ContactSensorCfg(
-        prim_path="/World/envs/env_.*/Robot/.*_(thigh|calf)",
+        prim_path="/World/envs/env_.*/Robot/.*(_thigh|_calf|trunk)",
         update_period=0.0,
         force_threshold=1.0,
         history_length=1,
         debug_vis=False,
     )
     
-    # 非法接触检测 terminate_after_contacts_on = ["hip"]
+    """# 非法接触检测 terminate_after_contacts_on = ["hip"]
     terminate_after_contacts: ContactSensorCfg = ContactSensorCfg(
         prim_path="/World/envs/env_.*/Robot/.*_(hip)",
         update_period=0.0,
         force_threshold=1.0,
         history_length=1,
         debug_vis=False,
-    )
+    )"""
 
 
 ##
@@ -417,39 +417,17 @@ class VbcSceneCfg(InteractiveSceneCfg):
 class ActionsCfg:
     """Action specifications for the MDP."""
 
-    # 腿部动作空间 - 12维, 使用关节位置控制
-    leg_actions = mdp.JointPositionActionCfg(
+    # 腿部动作空间 - 17维, 使用关节位置控制
+    actions = mdp.JointPositionActionCfg(
         asset_name="robot",
         joint_names=[
             "FL_hip_joint", "FR_hip_joint", "RL_hip_joint", "RR_hip_joint",
             "FL_thigh_joint", "FR_thigh_joint", "RL_thigh_joint", "RR_thigh_joint",
             "FL_calf_joint", "FR_calf_joint", "RL_calf_joint", "RR_calf_joint",
+            "arm_joint1", "arm_joint2", "arm_joint3", "arm_joint4", "arm_joint5"
         ],
         scale=0.25,
         use_default_offset=True,
-    )
-
-    # 机械臂动作空间 - 使用从 Command 读取目标的 IK 控制
-    #
-    # 关键区别:
-    # 1. 使用 CommandBasedIKActionCfg (自定义) 而非 DifferentialInverseKinematicsActionCfg
-    # 2. 动作维度 = 0 (不需要策略网络输出机械臂目标)
-    # 3. 目标来源: commands.target_position_commands (7维: pos+quat)
-    # 4. command_type="position" 表示只使用位置目标 (忽略姿态)
-    #
-    # 浮动基座 Jacobian 处理 (自动):
-    # - Jacobian 列索引: [0-5: 基座, 6-17: 腿部, 18-23: 机械臂]
-    # - joint1-6 自动映射到 Jacobian[18-23]列 (内部自动 +6)
-    arm_actions = mdp.CommandBasedIKActionCfg(
-        asset_name="robot",
-        body_name="gripperMover",
-        joint_names=["arm_joint1", "arm_joint2", "arm_joint3", "arm_joint4", "arm_joint5", "arm_joint6"],
-        command_name="target_position_commands",
-        controller=DifferentialIKControllerCfg(
-            command_type="pose",  # "position" 只控制位置, "pose" 控制位置+姿态
-            ik_method="dls",
-            use_relative_mode=False,
-        )
     )
 
 
@@ -460,18 +438,31 @@ class ObservationsCfg:
     @configclass
     class PolicyCfg(ObsGroup):
         """Observations for policy group.
-        
-        基础观测 (70维总计):
-        - 机身方向 (Body Orientation) (维度: 2): 机身的 roll 和 pitch 角
-        - 机身角速度 (Base Angular Velocity) (维度: 3): 机身在本地坐标系下的 x, y, z 轴角速度
-        - 关节位置 (DOF Positions) (维度: 18): 所有18个关节相对默认位置的差值
-        - 关节速度 (DOF Velocities) (维度: 18): 所有18个关节的当前速度
-        - 上一时刻的动作 (Last Actions) (维度: 12): 腿部动作历史
-        - 足端接触状态 (Foot Contacts) (维度: 4): 四个足端接触布尔值
-        - 指令 (Commands) (维度: 3): 运动指令 (lin_vel_x, lin_vel_y, ang_vel_yaw)
-        - 末端执行器目标位置 (End-Effector Goal Position) (维度: 3): 机身本地坐标系下的目标位置
-        - 末端执行器目标姿态 (维度: 3): 硬编码为0的占位符
-        - 步态时钟信号 (Gait Clock) (维度: 4): 每只脚的相位正弦波 (2Hz Trotting)
+        本体感知 (Proprioception):
+
+            get_body_orientation() (通常是重力向量或欧拉角，维度 2 或 3)
+
+            base_ang_vel (IMU 陀螺仪数据)
+
+            dof_pos & dof_vel (电机编码器数据)
+
+        动作历史:
+
+            actions (上一时刻的输出，用于让网络学会平滑控制)
+
+        任务指令:
+
+            sin_pos, cos_pos (步态时钟)
+
+            commands (包括期望速度、期望末端位置等)
+
+        噪声处理 (Noise Injection):
+
+            代码包含 if self.add_noise: 逻辑。
+
+        历史堆叠 (Frame Stacking):
+
+            obs_buf_all = torch.stack(..., dim=1)
         """
 
         # 1. 机身方向 (2维) - 提取projected_gravity的x,y分量获取roll和pitch信息
@@ -479,26 +470,109 @@ class ObservationsCfg:
             func=base_orientation_2d,
             params={"asset_cfg": SceneEntityCfg("robot")}
         )
+        
 
-        # 2. 机身角速度 (3维) - 机身在本地坐标系下的角速度
+        def __post_init__(self) -> None:
+            self.enable_corruption = False
+            self.concatenate_terms = True
+    
+    @configclass
+    class privilegedObs(ObsGroup):
+        """
+        privilieged观测:
+            索引/切片,变量名,物理含义,维度估算,作用
+            1,base_lin_vel,基座线速度,3,核心状态
+            2,ee_pos_sphe_arm,末端执行器球坐标位置,3,操作任务目标
+            3,forces_local (Gripper),夹爪受力,3,感知交互力
+            4,forces_local (Base),基座受力,3,感知碰撞/负载
+            5,diff,关节位置误差 (Ref - Curr),12 (4腿x3),跟踪性能
+            6,mass_params_tensor,物理参数：质量,22,域随机化信息
+            7,friction_coeffs_tensor,物理参数：摩擦系数,1,域随机化信息
+            8,motor_strength,物理参数：电机强度,17,域随机化信息
+            9,stance_mask,步态计划（该哪条腿着地）,4,步态时序
+            10,contact_mask,真实接触状态,4,接触反馈
+            11,projected_gravity,重力在基座坐标系投影,3,姿态感知
+            12,base_ang_vel,基座角速度,3,核心状态
+            13,dof_pos (error),关节位置（减去默认位）,17,本体感知
+            14,dof_vel,关节速度,17,本体感知
+            15,actions,上一帧动作,17,动作平滑/延迟
+            16,sin/cos_pos,步态相位时钟,2,周期信号
+            17,commands,用户指令 (e.g. 速度指令),15,任务目标
+            18,ee_goal_offset...,末端与目标的偏差,3,操作误差
+        """
+
+        # 1. 基座线速度 (3维)
+        base_lin_vel = ObsTerm(
+            func=mdp.base_lin_vel,
+            params={"asset_cfg": SceneEntityCfg("robot")}
+        )
+        
+        # 2. 机械臂末端执行器球坐标位置 (3维)   base坐标系下
+        ee_goal_pos = ObsTerm(
+            func=ee_goal_pos_in_base_frame,
+            params={"command_name": "target_position_commands"}
+        )
+
+        # 3. 夹爪受力 (3维) unfinished
+        gripper_forces = ObsTerm(
+            func=gripper_forces,
+            params={"sensor_cfg": SceneEntityCfg("contact_feet_forces", body_names=".*gripperMover")}
+        )
+        # 4. 基座受力 (3维) unfinished
+        base_forces = ObsTerm(
+            func=base_forces,
+            params={"sensor_cfg": SceneEntityCfg("contact_feet_forces", body_names=".*base_link")}
+        )
+
+        # 5. diff,关节位置误差 (Ref - Curr),12 (4腿x3),跟踪性能
+
+        # 6. 随机化质量参数 (5维)
+        mass_params = ObsTerm(
+            func=privileged_mass_params,
+        )
+        
+        # 7. 随机化摩擦系数 (1维)
+        friction = ObsTerm(
+            func=privileged_friction,
+        )
+        
+        # 8. 随机化电机强度 (12维)
+        motor_strengths = ObsTerm(
+            func=privileged_motor_strengths,
+        )
+        # 9. 步态计划 (4维) - 四个足端的计划着地状态
+
+        # 10. 足端接触状态 (4维) - 四个足端的接触状态
+        foot_contacts = ObsTerm(
+            func=foot_contact_binary,
+            params={
+                "sensor_cfg": SceneEntityCfg("contact_feet_forces"),
+                "threshold": 1.5
+            }
+        )
+        # 11,projected_gravity,重力在基座坐标系投影,3
+        projected_gravity = ObsTerm(
+            func=mdp.projected_gravity_b,
+            params={"asset_cfg": SceneEntityCfg("robot")}
+        )
+        #  12,base_ang_vel,基座角速度,3
         base_ang_vel = ObsTerm(
             func=mdp.base_ang_vel,
             params={"asset_cfg": SceneEntityCfg("robot")}
         )
-
-        # 3. 关节位置 (18维) - 当前位置相对默认位置的偏移，排除夹爪关节
-        joint_pos_rel = ObsTerm(
+        # 13. 关节位置 (17维) - 当前位置相对默认位置的偏移，排除夹爪关节
+        dof_pos = ObsTerm(
             func=mdp.joint_pos_rel,
             params={"asset_cfg": SceneEntityCfg("robot", joint_names=[
                 "FL_hip_joint", "FR_hip_joint", "RL_hip_joint", "RR_hip_joint",
                 "FL_thigh_joint", "FR_thigh_joint", "RL_thigh_joint",
                 "RR_thigh_joint", "FL_calf_joint", "FR_calf_joint",
                 "RL_calf_joint", "RR_calf_joint", "arm_joint1", "arm_joint2",
-                "arm_joint3", "arm_joint4", "arm_joint5", "arm_joint6"
+                "arm_joint3", "arm_joint4", "arm_joint5"
             ])}
         )
-
-        # 4. 关节速度 (18维) - 排除夹爪关节
+        
+        # 14. 关节速度 (17维) - 排除夹爪关节
         joint_vel = ObsTerm(
             func=joint_vel_scaled,
             params={
@@ -507,40 +581,16 @@ class ObservationsCfg:
                     "FL_thigh_joint", "FR_thigh_joint", "RL_thigh_joint",
                     "RR_thigh_joint", "FL_calf_joint", "FR_calf_joint",
                     "RL_calf_joint", "RR_calf_joint", "arm_joint1", "arm_joint2",
-                    "arm_joint3", "arm_joint4", "arm_joint5", "arm_joint6"
+                    "arm_joint3", "arm_joint4", "arm_joint5"
                 ]),
                 "scale": 0.05  # 速度通常需要更小的缩放系数，例如 0.05
             }
         )
 
-        # 5. 上一时刻的动作 (12维) - 腿部动作历史
+        # 15. 上一时刻的动作 (12维)
         last_action = ObsTerm(func=mdp.last_action)
 
-        # 6. 足端接触状态 (4维) - 四个足端的接触状态
-        foot_contacts = ObsTerm(
-            func=foot_contact_binary,
-            params={
-                "sensor_cfg": SceneEntityCfg("contact_feet_forces"),
-                "threshold": 1.5
-            }
-        )
-
-        # 7. 指令 (3维) - 给定的机器人运动指令
-        commands = ObsTerm(
-            func=mdp.generated_commands,
-            params={"command_name": "locomotion_commands"}
-        )
-
-        # 8. 末端执行器目标位置 (3维) - 在机身本地坐标系下
-        ee_goal_pos = ObsTerm(
-            func=ee_goal_pos_in_base_frame,
-            params={"command_name": "target_position_commands"}
-        )
-
-        # 9. 末端执行器目标姿态 (3维) - 硬编码为0的占位符
-        ee_goal_orient = ObsTerm(func=ee_goal_orient_placeholder)
-
-        # 10. 步态时钟信号 (4维) - 每只脚的相位正弦波
+        # 16. 步态时钟信号 (4维) - 每只脚的相位正弦波
         # 用于引导机器人学习稳定的对角小跑步态
         # 频率: 2 Hz, 步态模式: Trotting (对角小跑)
         # 站立时所有足部时钟固定为支撑相 (-1)，行走时动态变化
@@ -553,34 +603,10 @@ class ObservationsCfg:
             }
         )
 
-        def __post_init__(self) -> None:
-            self.enable_corruption = False
-            self.concatenate_terms = True
-    
-    @configclass
-    class privilegedObs(ObsGroup):
-        """
-        privilieged观测 (18维):
-            - random_mass_params_tensor(5): [base_mass_delta, com_x, com_y,
-              com_z, gripper_mass_delta]
-            - random_friction(1): [static_friction]
-            - random_motor_strengths(12): [腿部12个关节的电机强度]
-              FL/FR/RL/RR每条腿3个关节
-        """
-        
-        # 1. 随机化质量参数 (5维)
-        mass_params = ObsTerm(
-            func=privileged_mass_params,
-        )
-        
-        # 2. 随机化摩擦系数 (1维)
-        friction = ObsTerm(
-            func=privileged_friction,
-        )
-        
-        # 3. 随机化电机强度 (12维)
-        motor_strengths = ObsTerm(
-            func=privileged_motor_strengths,
+        # 17. 指令 (3维) - 给定的机器人运动指令
+        commands = ObsTerm(
+            func=mdp.generated_commands,
+            params={"command_name": "locomotion_commands"}
         )
         
         def __post_init__(self) -> None:
@@ -860,7 +886,7 @@ class RewardsCfg:
     base_height_penalty = RewTerm(
         func=mdp.base_height,
         weight=-5.0,
-        params={"target_height": 0.4}  # 设置目标高度
+        params={"target_height": 0.36}  # 设置目标高度
     )
     # (7) Penalize torques applied l2 checked
     torque_penalty = RewTerm(func=mdp.joint_torques_l2,
@@ -1016,13 +1042,13 @@ class TerminationsCfg:
     # (1) Time out
     time_out = DoneTerm(func=mdp.time_out, time_out=True)
     # (2) Illegal contacts on selected bodiesfe
-    illegal_contacts = DoneTerm(
+    """illegal_contacts = DoneTerm(
         func=mdp.illegal_contact,
         params={
             "threshold": 1.0,
             "sensor_cfg": SceneEntityCfg("terminate_after_contacts"),
         },
-    )
+    )"""
     # (3) Base_height below minimum
     base_height = DoneTerm(
         func=mdp.root_height_below_minimum,
@@ -1046,9 +1072,9 @@ class TerminationsCfg:
 
 
 @configclass
-class VbcAliengoEnvCfg(ManagerBasedRLEnvCfg):
+class UniFPAliengoEnvCfg(ManagerBasedRLEnvCfg):
     # Scene settings
-    scene: VbcSceneCfg = VbcSceneCfg(num_envs=6144, env_spacing=4.0)
+    scene: UniFPSceneCfg = UniFPSceneCfg(num_envs=6144, env_spacing=4.0)
     # Basic settings
     observations: ObservationsCfg = ObservationsCfg()
     actions: ActionsCfg = ActionsCfg()

@@ -9,4 +9,4 @@ import gymnasium as gym  # noqa: F401
 # Import all tasks to register them
 ##
 
-from . import vbc_aliengo  # noqa: F401
+from . import uniFP_aliengo  # noqa: F401

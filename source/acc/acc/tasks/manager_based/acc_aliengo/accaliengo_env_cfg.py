@@ -61,9 +61,9 @@ class CommandsCfg:
         class Ranges:
             """Ranges for the commands."""
 
-            lin_vel_x: Tuple[float, float] = (-0.8, 0.8)
+            lin_vel_x: Tuple[float, float] = (-1.0, 1.0)
             lin_vel_y: Tuple[float, float] = (0.0, 0.0)
-            ang_vel_z: Tuple[float, float] = (-1.0, 1.0)
+            ang_vel_z: Tuple[float, float] = (0.0, 1.0)
             heading: Tuple[float, float] = (-math.pi, math.pi)
 
         # 命令范围
@@ -95,10 +95,10 @@ class CommandsCfg:
         sphere_center_z: float = 0.6  # VBC: 世界坐标系固定Z高度
         
         # 时间配置
-        move_time_range: Tuple[float, float] = (1.0, 2.0)  # VBC: 运动时长
+        move_time_range: Tuple[float, float] = (2.0, 3.0)  # VBC: 运动时长
         hold_time_range: Tuple[float, float] = (0.5, 1.2)  # VBC: 保持时长
         
-        max_collision_attempts: int = 10
+        max_collision_attempts: int = 20
         
         # 球坐标采样范围
         @configclass
@@ -421,7 +421,7 @@ class ObservationsCfg:
 class EventCfg:
     """Configuration for events."""
 
-    # 重置机器人根部状态 (位置、姿态、速度) - 关键修复
+    # 重置机器人根部状态 (位置、姿态、速度)
     reset_robot_base = EventTerm(
         func=mdp.reset_root_state_uniform,
         mode="reset",
@@ -433,7 +433,7 @@ class EventCfg:
             },
             "asset_cfg": SceneEntityCfg("robot"),
         },
-    ),
+    )
     
     # 重置关节位置和速度
     reset_joints_by_offset = EventTerm(
@@ -501,11 +501,11 @@ class RewardsCfg:
     # (14) Penalize torques too close to the limit
     # torque_limit_penalty = RewTerm(func=mdp.torque_limit_penalty, weight=-0.0001)
 
-    # (15) Tracking of linear velocity commands (xy axes) - 使用官方API
+    # (15) Tracking of linear velocity commands (xy axes)
     lin_vel_xy_tracking = RewTerm(
         func=mdp.track_lin_vel_xy_exp,
         weight=2.0,
-        params={"std": 0.25, "command_name": "locomotion_commands"}
+        params={"std": 0.5, "command_name": "locomotion_commands"}
     )
     # (16) Tracking of angular velocity command (yaw) - 使用官方API
     ang_vel_yaw_tracking = RewTerm(
