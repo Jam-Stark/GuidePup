@@ -35,6 +35,7 @@ import isaaclab.terrains.height_field.hf_terrains_cfg as hf_gen_cfg
 
 from .observation_compute import (
     ee_goal_pos_in_base_frame,
+    ee_goal_pos_in_sphere,
     ee_tracking_error_in_base_frame,
     base_orientation_2d,
     foot_contact_binary,
@@ -42,8 +43,8 @@ from .observation_compute import (
     privileged_mass_params,
     privileged_friction,
     privileged_motor_strengths,
-    joint_pos_rel_scaled,
-    joint_vel_scaled,
+    gait_clock_signal,
+    stance_mask,
 )
 
 # 导入自定义命令生成器
@@ -58,13 +59,17 @@ class CommandsCfg:
     class LocomotionCommandCfg(CommandTermCfg):
         """Configuration for base locomotion commands."""
 
-        # 必需字段：指定命令生成器的类类型 - 使用扩展版本支持站立时角速度也为0
+        # 必需字段：指定命令生成器的类类型
         class_type = ExtendedUniformVelocityCommand
         
         # 必需字段：重采样时间范围（秒）
-        resampling_time_range: Tuple[float, float] = (10.0, 10.0)
+        resampling_time_range: Tuple[float, float] = (5.0, 5.0)
         heading_command: bool = False
-        rel_standing_envs: float = 0.2
+        rel_standing_envs: float = 0.3
+
+        ang_vel_yaw_clip: float = 0.2
+        lin_vel_x_clip: float = 0.1
+        lin_vel_y_clip: float = 0.1
 
         # 命令名称
         command_name: str = "locomotion_commands"
@@ -76,9 +81,9 @@ class CommandsCfg:
         class Ranges:
             """Ranges for the commands."""
 
-            lin_vel_x: Tuple[float, float] = (0.0, 0.8)
-            lin_vel_y: Tuple[float, float] = (0.0, 0.0)
-            ang_vel_z: Tuple[float, float] = (-1.0, 1.0)
+            lin_vel_x: Tuple[float, float] = (-0.6, 0.6)
+            lin_vel_y: Tuple[float, float] = (-0.4, 0.4)
+            ang_vel_z: Tuple[float, float] = (-0.6, 0.6)
             heading: Tuple[float, float] = (-math.pi, math.pi)
 
         # 命令范围
@@ -174,6 +179,7 @@ class CommandsCfg:
         # 可视化
         debug_vis: bool = True
 
+    
     locomotion_commands: LocomotionCommandCfg = LocomotionCommandCfg()
     target_position_commands: TargetPositionCommandCfg = TargetPositionCommandCfg()
 
@@ -398,16 +404,6 @@ class UniFPSceneCfg(InteractiveSceneCfg):
         history_length=1,
         debug_vis=False,
     )
-    
-    """# 非法接触检测 terminate_after_contacts_on = ["hip"]
-    terminate_after_contacts: ContactSensorCfg = ContactSensorCfg(
-        prim_path="/World/envs/env_.*/Robot/.*_(hip)",
-        update_period=0.0,
-        force_threshold=1.0,
-        history_length=1,
-        debug_vis=False,
-    )"""
-
 
 ##
 # MDP settings
@@ -470,7 +466,47 @@ class ObservationsCfg:
             func=base_orientation_2d,
             params={"asset_cfg": SceneEntityCfg("robot")}
         )
+        # 2,base_ang_vel,基座角速度,3
+        base_ang_vel = ObsTerm(
+            func=mdp.base_ang_vel,
+            params={"asset_cfg": SceneEntityCfg("robot")}  ,
+            scale=0.05
+        )
+        # 3. 关节位置 (17维) - 当前位置相对默认位置的偏移，排除夹爪关节
+        dof_pos = ObsTerm(
+            func=mdp.joint_pos_rel,
+            params={"asset_cfg": SceneEntityCfg("robot", joint_names=[
+                "FL_hip_joint", "FR_hip_joint", "RL_hip_joint", "RR_hip_joint",
+                "FL_thigh_joint", "FR_thigh_joint", "RL_thigh_joint",
+                "RR_thigh_joint", "FL_calf_joint", "FR_calf_joint",
+                "RL_calf_joint", "RR_calf_joint", "arm_joint1", "arm_joint2",
+                "arm_joint3", "arm_joint4", "arm_joint5"
+            ])},
+            scale=1.0
+        )
         
+        # 4. 关节速度 (17维) - 排除夹爪关节
+        joint_vel = ObsTerm(
+            func=mdp.joint_vel_rel,
+            params={
+                "asset_cfg": SceneEntityCfg("robot", joint_names=[
+                    "FL_hip_joint", "FR_hip_joint", "RL_hip_joint", "RR_hip_joint",
+                    "FL_thigh_joint", "FR_thigh_joint", "RL_thigh_joint",
+                    "RR_thigh_joint", "FL_calf_joint", "FR_calf_joint",
+                    "RL_calf_joint", "RR_calf_joint", "arm_joint1", "arm_joint2",
+                    "arm_joint3", "arm_joint4", "arm_joint5"
+                ])},
+            scale=0.05
+        )
+
+        # 5. 上一时刻的动作 (17维)
+        last_action = ObsTerm(func=mdp.last_action)
+        # 6. 步态时钟信号 (2维) - 全局时钟正弦余弦
+        gait_clock = ObsTerm(
+            func=gait_clock_signal,
+        )
+        # 7. 指令 (15维) - 给定的机器人运动指令
+
 
         def __post_init__(self) -> None:
             self.enable_corruption = False
@@ -509,18 +545,18 @@ class ObservationsCfg:
         
         # 2. 机械臂末端执行器球坐标位置 (3维)   base坐标系下
         ee_goal_pos = ObsTerm(
-            func=ee_goal_pos_in_base_frame,
+            func=ee_goal_pos_in_sphere,
             params={"command_name": "target_position_commands"}
         )
 
         # 3. 夹爪受力 (3维) unfinished
         gripper_forces = ObsTerm(
-            func=gripper_forces,
+            func= gripper_forces,
             params={"sensor_cfg": SceneEntityCfg("contact_feet_forces", body_names=".*gripperMover")}
         )
         # 4. 基座受力 (3维) unfinished
         base_forces = ObsTerm(
-            func=base_forces,
+            func= base_forces,
             params={"sensor_cfg": SceneEntityCfg("contact_feet_forces", body_names=".*base_link")}
         )
 
@@ -574,7 +610,7 @@ class ObservationsCfg:
         
         # 14. 关节速度 (17维) - 排除夹爪关节
         joint_vel = ObsTerm(
-            func=joint_vel_scaled,
+            func=mdp.joint_vel_rel,
             params={
                 "asset_cfg": SceneEntityCfg("robot", joint_names=[
                     "FL_hip_joint", "FR_hip_joint", "RL_hip_joint", "RR_hip_joint",
@@ -582,9 +618,8 @@ class ObservationsCfg:
                     "RR_thigh_joint", "FL_calf_joint", "FR_calf_joint",
                     "RL_calf_joint", "RR_calf_joint", "arm_joint1", "arm_joint2",
                     "arm_joint3", "arm_joint4", "arm_joint5"
-                ]),
-                "scale": 0.05  # 速度通常需要更小的缩放系数，例如 0.05
-            }
+                ])},
+            scale=0.05
         )
 
         # 15. 上一时刻的动作 (12维)
@@ -699,7 +734,7 @@ class EventCfg:
     
     # 1. 物理材质随机化 - 静摩擦和动摩擦
     randomize_physics_material = EventTerm(
-        func=mdp.randomize_rigid_body_material,
+        func=mdp.my_randomize_rigid_body_material,
         mode="reset",
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
@@ -709,23 +744,11 @@ class EventCfg:
             "num_buckets": 1000,  # 离散化桶数，提高采样效率
         },
     )
-    
-    # 1.1 缓存物理材质随机化参数（用于 privileged observations）
-    cache_physics_material = EventTerm(
-        func=mdp.cache_friction_randomization,
-        mode="reset",
-        params={
-            "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
-            "static_friction_range": (0.3, 3.0),
-            "dynamic_friction_range": (0.3, 3.0),
-            "restitution_range": (0.0, 0.0),
-            "num_buckets": 1000,
-        },
-    )
+
     
     # 2. 腿部关节刚度和阻尼随机化
     randomize_leg_joint_gains = EventTerm(
-        func=mdp.randomize_actuator_gains,
+        func=mdp.my_randomize_actuator_gains,
         mode="reset",
         params={
             "asset_cfg": SceneEntityCfg("robot", joint_names=[
@@ -739,27 +762,11 @@ class EventCfg:
             "distribution": "uniform",  # 均匀分布
         },
     )
-    
-    # 2.1 缓存腿部关节刚度随机化参数（用于 privileged observations）
-    cache_leg_joint_gains = EventTerm(
-        func=mdp.cache_motor_strength_randomization,
-        mode="reset",
-        params={
-            "asset_cfg": SceneEntityCfg("robot", joint_names=[
-                "FL_hip_joint", "FR_hip_joint", "RL_hip_joint", "RR_hip_joint",
-                "FL_thigh_joint", "FR_thigh_joint", "RL_thigh_joint", "RR_thigh_joint",
-                "FL_calf_joint", "FR_calf_joint", "RL_calf_joint", "RR_calf_joint",
-            ]),
-            "stiffness_distribution_params": (0.7, 1.3),
-            "damping_distribution_params": (0.7, 1.3),
-            "operation": "scale",
-            "distribution": "uniform",
-        },
-    )
+
     
     # 3. 机械臂关节刚度和阻尼随机化
     randomize_arm_joint_gains = EventTerm(
-        func=mdp.randomize_actuator_gains,
+        func=mdp.my_randomize_actuator_gains,
         mode="reset",
         params={
             "asset_cfg": SceneEntityCfg("robot", joint_names=[
@@ -774,80 +781,43 @@ class EventCfg:
     
     # ========== 启动时随机化事件 (startup mode) ==========
     
-    # 4. 基座质量随机化 - 增加0到15公斤
+    # 4. 基座质量随机化 - 增加0到10公斤（使用缓存版本以保存采样值）
     randomize_base_mass = EventTerm(
-        func=mdp.randomize_rigid_body_mass,
+        func=mdp.my_randomize_rigid_body_mass,
         mode="startup",
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names="base"),
-            "mass_distribution_params": (0.0, 10.0),
+            "mass_distribution_params": (0.0, 5.0),
             "operation": "add",  # 添加操作
             "distribution": "uniform",
-        },
-    )
-    
-    # 4.1 缓存基座质量随机化参数（用于 privileged observations）
-    cache_base_mass = EventTerm(
-        func=mdp.cache_base_mass_randomization,
-        mode="startup",
-        params={
-            "asset_cfg": SceneEntityCfg("robot", body_names="base"),
-            "mass_distribution_params": (0.0, 15.0),
-            "operation": "add",
-            "distribution": "uniform",
+            "recompute_inertia": True,  # 重新计算惯性张量
         },
     )
     
     # 5. 基座质心随机化 - xyz方向各偏移±0.15米
     randomize_base_com = EventTerm(
-        func=mdp.randomize_rigid_body_com,
+        func=mdp.my_randomize_rigid_body_com,
         mode="startup",
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names="base"),
             "com_range": {
-                "x": (-0.15, 0.15),
-                "y": (-0.15, 0.15),
-                "z": (-0.15, 0.15),
+                "x": (-0.1, 0.1),
+                "y": (-0.1, 0.1),
+                "z": (-0.1, 0.1),
             },
         },
     )
     
-    # 5.1 缓存基座质心随机化参数（用于 privileged observations）
-    cache_base_com = EventTerm(
-        func=mdp.cache_base_com_randomization,
-        mode="startup",
-        params={
-            "asset_cfg": SceneEntityCfg("robot", body_names="base"),
-            "com_range": {
-                "x": (-0.15, 0.15),
-                "y": (-0.15, 0.15),
-                "z": (-0.15, 0.15),
-            },
-            "operation": "add",
-        },
-    )
-    
-    # 6. 夹爪质量随机化 - 增加0到0.1公斤
+    # 6. 夹爪质量随机化 - 增加0到0.1公斤（使用缓存版本以保存采样值）
     randomize_gripper_mass = EventTerm(
-        func=mdp.randomize_rigid_body_mass,
+        func=mdp.my_randomize_rigid_body_mass,
         mode="startup",
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names="gripperMover"),
             "mass_distribution_params": (0.0, 0.1),
             "operation": "add",
             "distribution": "uniform",
-        },
-    )
-    
-    # 6.1 缓存夹爪质量随机化参数（用于 privileged observations）
-    cache_gripper_mass = EventTerm(
-        func=mdp.cache_gripper_mass_randomization,
-        mode="startup",
-        params={
-            "asset_cfg": SceneEntityCfg("robot", body_names="gripperMover"),
-            "mass_distribution_params": (0.0, 0.1),
-            "operation": "add",
-            "distribution": "uniform",
+            "recompute_inertia": True,  # 重新计算惯性张量
         },
     )
     

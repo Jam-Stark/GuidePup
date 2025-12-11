@@ -36,19 +36,32 @@ def ee_pos_in_base_frame(env, gripper_cfg: SceneEntityCfg) -> torch.Tensor:
 
 
 def ee_goal_pos_in_base_frame(env, command_name: str) -> torch.Tensor:
-    """Computes the target position command in the base frame."""
+    """Computes the target position command in the base frame (Cartesian)."""
     # 1. Get robot base pose in world frame
     robot_base_pos_w = env.scene["robot"].data.root_pos_w
     robot_base_quat_w = env.scene["robot"].data.root_quat_w
 
-    # 2. Get target position command - access command data correctly using Isaac Lab API
+    # 2. Get target position command
     command_term = env.command_manager._terms[command_name]
-    target_pos_w = command_term.command[:, :3]  # First 3 components are position
+    
+    # Handle DynamicManipulationCommand which stores world pos in pos_w
+    if hasattr(command_term, "pos_w"):
+        target_pos_w = command_term.pos_w
+    else:
+        # Fallback for other commands (assuming they store Cartesian in command)
+        target_pos_w = command_term.command[:, :3]
 
     # 3. Transform target position to robot base frame
     target_pos_b = transform_points(target_pos_w.unsqueeze(1), robot_base_pos_w, robot_base_quat_w).squeeze(1)
     
     return target_pos_b.view(env.num_envs, -1)
+
+
+def ee_goal_pos_in_sphere(env, command_name: str) -> torch.Tensor:
+    """Computes the target position command in spherical coordinates."""
+    command_term = env.command_manager._terms[command_name]
+    # The command is already in spherical coordinates [r, p, y]
+    return command_term.command[:, :3].view(env.num_envs, -1)
 
 
 def ee_tracking_error_in_base_frame(env, command_name: str, gripper_cfg: SceneEntityCfg) -> torch.Tensor:
@@ -63,7 +76,13 @@ def ee_tracking_error_in_base_frame(env, command_name: str, gripper_cfg: SceneEn
 
     # 2. Get target position command - correct way to access command data
     # Access command through _terms dictionary as official Isaac Lab API
-    target_pos_w = env.command_manager._terms[command_name].command[:, :3]
+    command_term = env.command_manager._terms[command_name]
+    
+    # Check if command term has pos_w property (DynamicManipulationCommand)
+    if hasattr(command_term, "pos_w"):
+        target_pos_w = command_term.pos_w
+    else:
+        target_pos_w = command_term.command[:, :3]
 
     # 3. Get end-effector position in world frame
     # We need to find the body index for the gripper
@@ -152,18 +171,20 @@ def ee_goal_orient_placeholder(env: ManagerBasedRLEnv) -> torch.Tensor:
 # ========== Privileged Observations ==========
 
 def privileged_mass_params(env: ManagerBasedRLEnv) -> torch.Tensor:
-    """
-    Get the randomized mass parameters (5 dimensions).
+    """返回缓存的质量随机化参数 (5维)。
     
     Returns:
-        Tensor of shape (num_envs, 5) containing:
-        - base_mass_delta: Added mass to base (kg)
-        - com_x, com_y, com_z: Center of mass offset (m)
-        - gripper_mass_delta: Added mass to gripper (kg)
+        形状为 (num_envs, 5) 的张量，包含：
+        - [0] base_mass_delta: 添加到基座的质量 (kg)
+        - [1] com_x: 质心X轴偏移 (m)
+        - [2] com_y: 质心Y轴偏移 (m)
+        - [3] com_z: 质心Z轴偏移 (m)
+        - [4] gripper_mass_delta: 添加到夹爪的质量 (kg)
     
-    Note: These values are set during startup/reset events and cached in the environment.
+    说明：这些值由 cache_base_mass_randomization 等事件函数按随机化分布采样并缓存，
+    Isaac Lab 当前未提供从引擎回读已应用值的接口。
     """
-    # Initialize if not exists
+    # 初始化缓存
     if not hasattr(env, '_privileged_mass_params'):
         env._privileged_mass_params = torch.zeros(env.num_envs, 5, device=env.device)
     
@@ -171,15 +192,14 @@ def privileged_mass_params(env: ManagerBasedRLEnv) -> torch.Tensor:
 
 
 def privileged_friction(env: ManagerBasedRLEnv) -> torch.Tensor:
-    """
-    Get the randomized friction coefficient (1 dimension).
+    """返回缓存的摩擦随机化参数 (1维)。
     
     Returns:
-        Tensor of shape (num_envs, 1) containing static_friction value.
+        形状为 (num_envs, 1) 的张量，包含静摩擦系数值。
     
-    Note: This value is set during reset events and cached in the environment.
+    说明：这个值由 cache_friction_randomization 事件函数按随机化分布采样并缓存。
     """
-    # Initialize if not exists
+    # 初始化缓存
     if not hasattr(env, '_privileged_friction'):
         env._privileged_friction = torch.ones(env.num_envs, 1, device=env.device)
     
@@ -187,16 +207,17 @@ def privileged_friction(env: ManagerBasedRLEnv) -> torch.Tensor:
 
 
 def privileged_motor_strengths(env: ManagerBasedRLEnv) -> torch.Tensor:
-    """
-    Get the randomized motor strength scaling factors (12 dimensions).
+    """从物理引擎读取随机化的电机刚度 (12维)。
     
     Returns:
-        Tensor of shape (num_envs, 12) containing stiffness scaling factors
-        for the 12 leg joints (FL/FR/RL/RR hip, thigh, calf).
+        形状为 (num_envs, 12) 的张量，包含12个腿部关节的实际刚度值：
+        - 关节顺序: FL hip, FL thigh, FL calf, FR hip, FR thigh, FR calf,
+                   RL hip, RL thigh, RL calf, RR hip, RR thigh, RR calf
     
-    Note: These values are set during reset events and cached in the environment.
+    说明：这些值由 cache_motor_strength_randomization 事件函数从执行器直接读取。
+    从 articulation.actuators["legs"].stiffness 获取的是物理引擎中真实应用的刚度值。
     """
-    # Initialize if not exists
+    # 初始化缓存
     if not hasattr(env, '_privileged_motor_strengths'):
         env._privileged_motor_strengths = torch.ones(env.num_envs, 12, device=env.device)
     
@@ -204,6 +225,44 @@ def privileged_motor_strengths(env: ManagerBasedRLEnv) -> torch.Tensor:
 
 
 # ========== Gait Clock Observations ==========
+
+def _update_gait_state(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    gait_frequency: float
+) -> torch.Tensor:
+    """
+    统一更新步态相位状态，防止在同一步骤中多次调用导致重复更新。
+    """
+    # 1. 初始化状态变量
+    if not hasattr(env, "gait_indices"):
+        env.gait_indices = torch.zeros(env.num_envs, device=env.device)
+    if not hasattr(env, "gait_last_update_step"):
+        env.gait_last_update_step = -1
+
+    # 2. 检查是否需要在当前步更新 (防重入)
+    # env.common_step_counter 在每一步仿真开始时递增
+    if env.common_step_counter > env.gait_last_update_step:
+        dt = env.step_dt
+        cycle_time = 1.0 / gait_frequency
+        
+        # 累加相位
+        env.gait_indices = torch.remainder(env.gait_indices + dt / cycle_time, 1.0)
+        
+        # 处理站立重置
+        try:
+            locomotion_command_term = env.command_manager._terms[command_name]
+            is_standing = locomotion_command_term.is_standing_env
+            env.gait_indices[is_standing] = 0.0
+        except KeyError:
+            # 如果找不到命令，保持原样或打印警告
+            pass
+            
+        # 更新时间戳
+        env.gait_last_update_step = env.common_step_counter
+    
+    return env.gait_indices
+
 
 def gait_clock_signal(
     env: ManagerBasedRLEnv,
@@ -213,55 +272,11 @@ def gait_clock_signal(
 ) -> torch.Tensor:
     """
     计算步态时钟信号（4维，每只脚一个正弦波）
-    
-    实现 VBC 论文中的显式步态时钟，用于引导机器人学习稳定的对角小跑步态。
-    
-    步态参数：
-        - 频率: 2 Hz (周期 0.5 秒)
-        - 步态模式: Trotting (小跑)
-        - 支撑相/摆动相: 各占 50%
-        - 相位差: 0.5 (180度，对角足同相)
-    
-    足部相位分配（实现对角小跑）：
-        - 行走时 (walking):
-            - FL (左前): gait_phase + 0.5
-            - FR (右前): gait_phase + 0.0
-            - RL (左后): gait_phase + 0.0
-            - RR (右后): gait_phase + 0.5
-        - 站立时 (standing):
-            - 所有足部: 相位 = 0.0 (支撑相中期，sin(0) = 0 → 实际上 sin(2π×0) = 0)
-            - 或者更准确地：相位使得 sin 值为 -1（完全支撑相）
-    
-    Args:
-        env: The manager-based RL environment instance.
-        command_name: locomotion 命令名称 (默认: "locomotion_commands")
-        gait_frequency: 步态频率 (Hz)，默认 2.0 Hz
-        phase_offset: 对角足之间的相位偏移，默认 0.5 (180度)
-    
-    Returns:
-        Tensor of shape (num_envs, 4) 包含每只脚的正弦波时钟信号。
-        - 行走时，值范围 [-1, 1]：
-            - 接近 1: 摆动相的最高点
-            - 接近 -1: 支撑相的中间点
-            - 0: 相位转换点
-        - 站立时，所有值为 -1（表示持续支撑相）
     """
-    # 获取 locomotion 命令以判断站立/行走状态
-    locomotion_command_term = env.command_manager._terms[command_name]
-    is_standing = locomotion_command_term.is_standing_env
+    # 1. 获取统一更新后的相位
+    gait_phase = _update_gait_state(env, command_name, gait_frequency)
     
-    # 获取仿真时间步长
-    dt = env.step_dt
-    
-    # 计算当前 episode 的时间（秒）
-    current_time = env.episode_length_buf.float() * dt
-    
-    # 主时钟相位 (0 到 1 循环)
-    # 使用模运算确保相位在 [0, 1) 范围内循环
-    gait_phase = (current_time * gait_frequency) % 1.0
-    
-    # 为四只脚分配相位（小跑步态：对角足同相）
-    # 创建 shape (num_envs, 4) 的张量
+    # 2. 为四只脚分配相位（小跑步态：对角足同相）
     foot_phases = torch.zeros(env.num_envs, 4, device=env.device)
     
     # FL (左前) 和 RR (右后) 是一对对角足 - 相位 + offset
@@ -272,19 +287,18 @@ def gait_clock_signal(
     foot_phases[:, 1] = gait_phase  # FR
     foot_phases[:, 2] = gait_phase  # RL
     
-    # 转换为正弦信号：sin(2π × phase)
-    # 这提供了平滑的、周期性的时钟信号给策略网络
+    # 3. 转换为正弦信号
     clock_signals = torch.sin(2 * torch.pi * foot_phases)
     
-    # 站立状态：所有足部都应该在支撑相
-    # 设置时钟信号为 -1（对应 sin(2π × 0.75) = -1，表示支撑相中期）
-    # 这告诉策略："所有足部应该保持接触地面"
+    # 4. 处理站立状态输出
+    # 虽然相位已重置为0，但为了明确物理含义，站立时输出 -1.0 (支撑相)
+    locomotion_command_term = env.command_manager._terms[command_name]
+    is_standing = locomotion_command_term.is_standing_env
+    
     standing_signal = torch.full((env.num_envs, 4), -1.0, device=env.device)
     
-    # 根据 is_standing mask 选择信号
-    # 站立环境使用 standing_signal,行走环境使用 clock_signals
     final_signals = torch.where(
-        is_standing.unsqueeze(1),  # (num_envs, 1) - 广播到 (num_envs, 4)
+        is_standing.unsqueeze(1),
         standing_signal,
         clock_signals
     )
@@ -292,40 +306,75 @@ def gait_clock_signal(
     return final_signals
 
 
-def joint_pos_rel_scaled(
+def gait_clock_signal(
     env: ManagerBasedRLEnv,
-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
-    scale: float = 1.0
+    command_name: str = "locomotion_commands",
+    gait_frequency: float = 2.0
 ) -> torch.Tensor:
-    """关节位置相对于默认位置的偏移（带缩放）
+    """
+    计算全局步态时钟信号（2维：sin, cos）
+    """
+    # 1. 获取统一更新后的相位
+    gait_phase = _update_gait_state(env, command_name, gait_frequency)
+    
+    # 2. 计算 2维信号: [sin(2πφ), cos(2πφ)]
+    # 站立时 gait_phase=0 -> [0, 1]
+    clock_signals = torch.stack([
+        torch.sin(2 * torch.pi * gait_phase),
+        torch.cos(2 * torch.pi * gait_phase)
+    ], dim=1)
+    
+    return clock_signals
+
+
+def stance_mask(
+    env: ManagerBasedRLEnv,
+    command_name: str = "locomotion_commands",
+    gait_frequency: float = 2.0,
+    phase_offset: float = 0.5
+) -> torch.Tensor:
+    """
+    计算步态接触计划（4维，0/1 二值信号）
+    
+    功能：明确告知哪只脚应该落地（支撑相）。
+    基于 gait_clock_signal 的相位逻辑，将连续信号二值化。
     
     Args:
         env: 环境实例
-        asset_cfg: 资产配置，指定要读取的关节
-        scale: 缩放系数，用于归一化观测值
-    
+        command_name: 命令名称
+        gait_frequency: 步态频率
+        phase_offset: 相位偏移
+        
     Returns:
-        缩放后的关节位置偏移 (num_envs, num_joints)
+        Tensor (num_envs, 4):
+            - 1.0: 计划支撑相 (Stance / Ground)
+            - 0.0: 计划摆动相 (Swing / Air)
     """
-    asset: Articulation = env.scene[asset_cfg.name]
-    joint_pos_rel = asset.data.joint_pos[:, asset_cfg.joint_ids] - asset.data.default_joint_pos[:, asset_cfg.joint_ids]
-    return joint_pos_rel * scale
-
-
-def joint_vel_scaled(
-    env: ManagerBasedRLEnv,
-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
-    scale: float = 1.0
-) -> torch.Tensor:
-    """关节速度（带缩放）
+    # 1. 获取统一更新后的相位
+    gait_phase = _update_gait_state(env, command_name, gait_frequency)
     
-    Args:
-        env: 环境实例
-        asset_cfg: 资产配置，指定要读取的关节
-        scale: 缩放系数，用于归一化观测值
+    # 2. 为四只脚分配相位
+    foot_phases = torch.zeros(env.num_envs, 4, device=env.device)
+    foot_phases[:, 0] = (gait_phase + phase_offset) % 1.0  # FL
+    foot_phases[:, 3] = (gait_phase + phase_offset) % 1.0  # RR
+    foot_phases[:, 1] = gait_phase  # FR
+    foot_phases[:, 2] = gait_phase  # RL
     
-    Returns:
-        缩放后的关节速度 (num_envs, num_joints)
-    """
-    asset: Articulation = env.scene[asset_cfg.name]
-    return asset.data.joint_vel[:, asset_cfg.joint_ids] * scale
+    # 3. 计算正弦波
+    # 根据当前约定：负值是支撑相，正值是摆动相
+    sin_waves = torch.sin(2 * torch.pi * foot_phases)
+    
+    # 4. 生成接触掩码 (0/1)
+    # sin_waves <= 0 表示支撑相 (1.0)
+    # sin_waves > 0  表示摆动相 (0.0)
+    contact_schedule = (sin_waves <= 0.0).float()
+    
+    # 5. 处理站立状态
+    locomotion_command_term = env.command_manager._terms[command_name]
+    is_standing = locomotion_command_term.is_standing_env
+    
+    # 站立时全为支撑相 (1.0)
+    contact_schedule[is_standing] = 1.0
+    
+    return contact_schedule
+

@@ -36,7 +36,7 @@ class DynamicManipulationCommand(CommandTerm):
     6. 碰撞检测：X∈[-0.8,0.1], Y∈[-0.2,0.2], Z∈[-0.7,-0.05]
     7. 初始化：固定起点(0.5,π/8,0) → 固定终点(0.7,0,0), 姿态(π/2,0,0)
     
-    命令格式 (7维): [pos_x, pos_y, pos_z, quat_w, quat_x, quat_y, quat_z]
+    命令格式 (7维): [radius, pitch, yaw, quat_w, quat_x, quat_y, quat_z]
     内部状态: 轨迹插值参数、起始/目标球坐标、时间计数器
     """
 
@@ -49,8 +49,11 @@ class DynamicManipulationCommand(CommandTerm):
         # 获取机器人资产
         self.robot: Articulation = env.scene[cfg.asset_name]
         
-        # 命令缓冲区: [pos_x, pos_y, pos_z, quat_w, quat_x, quat_y, quat_z]
+        # 命令缓冲区: [radius, pitch, yaw, quat_w, quat_x, quat_y, quat_z]
         self._command = torch.zeros(self.num_envs, 7, device=self.device)
+        
+        # 额外缓冲区：世界坐标系下的位置 [x, y, z] (用于奖励计算和可视化)
+        self._pos_w = torch.zeros(self.num_envs, 3, device=self.device)
         
         # 轨迹状态缓冲区
         self._current_step = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
@@ -85,15 +88,20 @@ class DynamicManipulationCommand(CommandTerm):
 
     @property
     def command(self) -> torch.Tensor:
-        """返回命令张量。形状为 (num_envs, 7): [pos(3), quat(4)]"""
+        """返回命令张量。形状为 (num_envs, 7): [sphere(3), quat(4)]"""
         return self._command
+
+    @property
+    def pos_w(self) -> torch.Tensor:
+        """返回世界坐标系下的目标位置。形状为 (num_envs, 3): [x, y, z]"""
+        return self._pos_w
 
     def _update_metrics(self):
         """更新度量指标"""
         if hasattr(self.cfg, 'body_name') and self.cfg.body_name:
             body_ids = self.robot.find_bodies(self.cfg.body_name)[0]
             ee_pos_w = self.robot.data.body_pos_w[:, body_ids[0], :]
-            target_pos_w = self._command[:, :3]
+            target_pos_w = self._pos_w  # 使用缓存的世界坐标位置
             self.metrics["position_error"] = torch.norm(target_pos_w - ee_pos_w, dim=1)
 
     def _resample_command(self, env_ids: Sequence[int]):
@@ -244,8 +252,11 @@ class DynamicManipulationCommand(CommandTerm):
         current_quat = self._slerp(self._start_quat, self._target_quat, t.squeeze(1))
         
         # 5. 更新命令缓冲区
-        self._command[:, :3] = current_pos_w
+        self._command[:, :3] = current_sphere  # 存储球坐标 [r, p, y]
         self._command[:, 3:7] = current_quat
+        
+        # 6. 更新世界坐标位置缓存
+        self._pos_w[:] = current_pos_w
     
     def _sample_spherical_coordinates(self, env_ids: torch.Tensor) -> torch.Tensor:
         """采样球坐标 (带轨迹碰撞检测)。
@@ -615,7 +626,7 @@ class DynamicManipulationCommand(CommandTerm):
 
         # 1. 显示当前插值点 (机械臂当前应该到达的位置)
         if hasattr(self, "current_goal_markers") and self.current_goal_markers is not None:
-            current_pos = self._command[:, :3]
+            current_pos = self._pos_w  # 使用世界坐标位置进行可视化
             current_quat = self._command[:, 3:7]
             # 为每个环境创建 marker 索引（都使用第一个 marker 类型 "arrow"）
             marker_indices = torch.zeros(self.num_envs, dtype=torch.int32, device=self.device)

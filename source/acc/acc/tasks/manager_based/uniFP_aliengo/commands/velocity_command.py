@@ -11,12 +11,22 @@ import torch
 from typing import TYPE_CHECKING, Sequence
 from isaaclab.markers import VisualizationMarkers
 from isaaclab.utils.math import quat_from_euler_xyz
+from isaaclab.utils import configclass
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
 
 # 导入父类和配置类
 from isaaclab.envs.mdp.commands import UniformVelocityCommand, UniformVelocityCommandCfg
+
+
+@configclass
+class ExtendedUniformVelocityCommandCfg(UniformVelocityCommandCfg):
+    """Configuration for the extended uniform velocity command generator."""
+    rel_standing_envs: float = 0.0
+    ang_vel_yaw_clip: float = 0.0
+    lin_vel_x_clip: float = 0.0
+    lin_vel_y_clip: float = 0.0
 
 
 class ExtendedUniformVelocityCommand(UniformVelocityCommand):
@@ -34,12 +44,15 @@ class ExtendedUniformVelocityCommand(UniformVelocityCommand):
           - lin_vel_y: Y方向线速度范围
           - ang_vel_z: Z轴角速度范围
           - heading: 航向角范围（如果启用）
+        - ang_vel_yaw_clip: 偏航角速度裁剪阈值
+        - lin_vel_x_clip: X方向线速度裁剪阈值
+        - lin_vel_y_clip: Y方向线速度裁剪阈值
     """
 
-    cfg: UniformVelocityCommandCfg
+    cfg: ExtendedUniformVelocityCommandCfg
     """命令配置"""
 
-    def __init__(self, cfg: UniformVelocityCommandCfg, env: ManagerBasedRLEnv):
+    def __init__(self, cfg: ExtendedUniformVelocityCommandCfg, env: ManagerBasedRLEnv):
         """初始化命令生成器。
         
         Args:
@@ -124,6 +137,20 @@ class ExtendedUniformVelocityCommand(UniformVelocityCommand):
             self.vel_command_b[env_ids_tensor[standing_mask], 0] = 0.0  # lin_vel_x = 0
             self.vel_command_b[env_ids_tensor[standing_mask], 1] = 0.0  # lin_vel_y = 0
             self.vel_command_b[env_ids_tensor[standing_mask], 2] = 0.0  # ang_vel_z = 0 （新增）
+
+        # Apply clipping
+        # Check if all components are within their respective clipping thresholds
+        is_small_x = torch.abs(self.vel_command_b[env_ids_tensor, 0]) < self.cfg.lin_vel_x_clip
+        is_small_y = torch.abs(self.vel_command_b[env_ids_tensor, 1]) < self.cfg.lin_vel_y_clip
+        is_small_yaw = torch.abs(self.vel_command_b[env_ids_tensor, 2]) < self.cfg.ang_vel_yaw_clip
+        
+        # Only if ALL components are small, we set everything to zero (stand command)
+        is_stand = is_small_x & is_small_y & is_small_yaw
+        
+        if is_stand.any():
+            self.vel_command_b[env_ids_tensor[is_stand], 0] = 0.0
+            self.vel_command_b[env_ids_tensor[is_stand], 1] = 0.0
+            self.vel_command_b[env_ids_tensor[is_stand], 2] = 0.0
 
     def _update_command(self):
         """更新命令 - 无需操作，因为命令是静态的直到重采样"""

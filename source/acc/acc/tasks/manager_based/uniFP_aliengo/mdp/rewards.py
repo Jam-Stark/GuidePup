@@ -104,7 +104,12 @@ def end_effector_pos_tracking(
     """
     # 1. Get target position command - 正确方式：通过command manager的_terms字典访问
     command_term = env.command_manager._terms[command_name]
-    target_pos_w = command_term.command[:, :3]  # 取前3维作为位置
+    
+    # Check if command term has pos_w property (DynamicManipulationCommand)
+    if hasattr(command_term, "pos_w"):
+        target_pos_w = command_term.pos_w
+    else:
+        target_pos_w = command_term.command[:, :3]  # 取前3维作为位置
 
     # 2. Get end-effector position in world frame - 正确的Isaac Lab方式
     gripper_body_indices = env.scene[gripper_cfg.name].find_bodies(gripper_cfg.body_names)[0]
@@ -143,7 +148,12 @@ def end_effector_pos_tracking_l2(
     """
     # 1. Get target position command - 正确方式：通过command manager的_terms字典访问
     command_term = env.command_manager._terms[command_name]
-    target_pos_w = command_term.command[:, :3]  # 取前3维作为位置
+    
+    # Check if command term has pos_w property (DynamicManipulationCommand)
+    if hasattr(command_term, "pos_w"):
+        target_pos_w = command_term.pos_w
+    else:
+        target_pos_w = command_term.command[:, :3]  # 取前3维作为位置
 
     # 2. Get end-effector position in world frame - 正确的Isaac Lab方式
     gripper_body_indices = env.scene[gripper_cfg.name].find_bodies(gripper_cfg.body_names)[0]
@@ -642,11 +652,9 @@ def reward_tracking_contacts_shaped_vel(
     """
     惩罚：支撑相时足部有速度（打滑）
     
-    返回值：正值表示违反程度（惩罚程度），配合负权重使用
-    
-    工作原理：
-        - 站立时：gait_clock 冻结为 -1.0 (全支撑相) → desired_contact 全为高值 → 惩罚任何足部移动
-        - 行走时：gait_clock 动态变化 → desired_contact 周期变化 → 只惩罚支撑相打滑
+    修复版本：
+    1. 使用 env.gait_indices 获取统一的步态相位。
+    2. 考虑站立状态（站立时应全为支撑相，且不应有速度）。
     
     Args:
         env: 环境实例
@@ -663,11 +671,12 @@ def reward_tracking_contacts_shaped_vel(
     foot_vel_w = robot.data.body_lin_vel_w[:, foot_indices]
     foot_velocities = torch.norm(foot_vel_w, dim=-1)
     
-    # 计算期望接触概率（基于步态相位）
-    # 注意：gait_clock_signal 已经处理了 standing/walking 区分
-    dt = env.step_dt
-    current_time = env.episode_length_buf * dt
-    gait_phase = (current_time * 2.0) % 1.0
+    # 获取步态相位 (优先使用 observation 计算的 stateful phase)
+    if hasattr(env, "gait_indices"):
+        gait_phase = env.gait_indices
+    else:
+        # Fallback: 如果尚未初始化 (极少情况)，使用 0
+        gait_phase = torch.zeros(env.num_envs, device=env.device)
     
     # 四足相位 (对角小跑步态)
     foot_phases = torch.stack([
@@ -677,10 +686,53 @@ def reward_tracking_contacts_shaped_vel(
         (gait_phase + 0.5) % 1.0,  # RR (右后)
     ], dim=1)
     
+    # 计算期望接触概率 (Von Mises 分布)
+    # 当 phase 接近 0 或 1 时 (支撑相中心)，cos -> 1, von_mises -> max
+    # 当 phase 接近 0.5 时 (摆动相中心)，cos -> -1, von_mises -> min
     von_mises = torch.exp(kappa_gait_probs * (torch.cos(2 * torch.pi * foot_phases) - 1))
     desired_contact = von_mises / (von_mises + 1e-8)
     
-    # 计算惩罚：支撑相时有速度 (返回正值)
+    # 处理站立状态：站立时所有脚都应该是支撑相 (desired_contact = 1.0)
+    # 我们可以通过检查 gait_indices 是否为 0 来隐式处理 (因为站立时 gait_indices 被重置为 0)
+    # 当 gait_indices = 0 时:
+    # FL/RR phase = 0.5 -> cos(-pi) = -1 -> desired_contact ~ 0 (摆动相?) -> 错误！
+    # 
+    # 修正逻辑：
+    # 站立时，gait_indices = 0。
+    # 此时我们需要所有脚都是支撑相。
+    # 我们可以直接覆盖 desired_contact。
+    
+    # 检查是否站立 (gait_indices == 0 是一种特征，但最好用 mask)
+    # 注意：这里假设 gait_clock_signal 已经运行并更新了 gait_indices
+    # 为了稳健性，我们再次获取 is_standing mask
+    # 但 rewards 不直接访问 command manager 比较好，或者我们可以假设 gait_indices == 0 就是站立
+    # 不过 gait_indices 刚好循环到 0 也是可能的。
+    # 让我们尝试获取 command (如果可能) 或者信任 gait_indices 的重置逻辑
+    
+    # 更好的方法：直接使用 env.gait_indices。
+    # 如果 env.gait_indices 被重置为 0，那么:
+    # FR/RL phase = 0 -> cos(0) = 1 -> desired_contact = 1 (支撑)
+    # FL/RR phase = 0.5 -> cos(pi) = -1 -> desired_contact = 0 (摆动)
+    # 这对于站立是不对的！站立时四脚都应支撑。
+    
+    # 因此，我们需要显式处理站立情况，或者在 gait_clock_signal 中不仅仅重置为 0，而是设置为让所有脚都支撑的值？
+    # 不，gait_clock_signal 的输出信号在站立时被强制为 -1 (支撑)。
+    # 但 gait_indices 状态本身被重置为 0。
+    
+    # 解决方案：在这里也获取 is_standing mask 并强制 desired_contact = 1.0
+    try:
+        # 尝试从 command manager 获取 (假设名为 locomotion_commands)
+        locomotion_command_term = env.command_manager._terms["locomotion_commands"]
+        is_standing = locomotion_command_term.is_standing_env
+        
+        # 站立时，期望所有脚接触
+        desired_contact[is_standing] = 1.0
+        
+    except (KeyError, AttributeError):
+        # 如果获取失败，仅依赖 gait_indices (可能不完美但能运行)
+        pass
+
+    # 计算惩罚：期望接触但实际有速度
     penalty = torch.zeros(env.num_envs, device=env.device)
     for i in range(4):
         penalty += -desired_contact[:, i] * \

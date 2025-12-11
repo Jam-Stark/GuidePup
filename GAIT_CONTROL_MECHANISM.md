@@ -52,13 +52,29 @@
 
 ### 2.2 工作原理
 
-#### 2.2.1 行走状态 (Walking)
+#### 2.2.1 核心机制：状态化相位 (Stateful Phase)
+
+**改进点**：不再使用绝对时间反算相位，而是维护内部状态 `env.gait_indices`，支持暂停和重置。
 
 ```python
-# 主时钟相位计算
-gait_phase = (current_time * gait_frequency) % 1.0  # 0.0 到 1.0 循环
+# 1. 初始化或获取步态相位状态
+if not hasattr(env, "gait_indices"):
+    env.gait_indices = torch.zeros(env.num_envs)
 
+# 2. 累加相位 (dt / cycle_time)
+dt = env.step_dt
+cycle_time = 1.0 / gait_frequency
+env.gait_indices = torch.remainder(env.gait_indices + dt / cycle_time, 1.0)
+
+# 3. 站立重置：当接收到站立指令时，重置相位为 0
+env.gait_indices[is_standing] = 0.0
+```
+
+#### 2.2.2 信号生成
+
+```python
 # 足部相位分配
+gait_phase = env.gait_indices
 foot_phases = [
     (gait_phase + 0.5) % 1.0,  # FL (左前)
     gait_phase,                 # FR (右前)
@@ -67,28 +83,13 @@ foot_phases = [
 ]
 
 # 转换为正弦信号
-clock_signals = sin(2π × foot_phases)  # 范围: [-1, 1]
-```
+clock_signals = sin(2π × foot_phases)
 
-**信号含义**：
-- `clock_signal ≈ +1.0`: 摆动相最高点（足部抬起最高）
-- `clock_signal ≈ 0.0`: 相位转换点（支撑相→摆动相 或 摆动相→支撑相）
-- `clock_signal ≈ -1.0`: 支撑相中期（足部稳定接触地面）
-
-#### 2.2.2 站立状态 (Standing)
-
-```python
-# 检测站立状态
-is_standing = locomotion_command_term.is_standing_env
-
-# 站立时冻结时钟信号
-standing_signal = torch.full((num_envs, 4), -1.0)  # 所有足部固定为支撑相
-
-# 根据状态选择信号
+# 站立处理：虽然相位重置为0，但为了明确物理含义，强制输出支撑信号
 final_signals = torch.where(
     is_standing.unsqueeze(1),
-    standing_signal,    # 站立 → 所有信号 = -1.0
-    clock_signals       # 行走 → 动态正弦波
+    torch.full((num_envs, 4), -1.0), # 站立 → 强制支撑相 (-1.0)
+    clock_signals                    # 行走 → 动态正弦波
 )
 ```
 
@@ -214,12 +215,25 @@ tracking_contacts_force = RewTerm(
 
 #### 3.3.2 惩罚计算
 
+**改进点**：使用统一的 `env.gait_indices` 状态，并显式强制站立时的接触期望。
+
 ```python
-# 对每只脚计算惩罚
+# 1. 获取统一相位
+gait_phase = env.gait_indices
+
+# 2. 计算期望接触概率 (Von Mises)
+von_mises = exp(κ × (cos(2π × foot_phases) - 1))
+desired_contact = von_mises / (von_mises + ε)
+
+# 3. 站立处理：站立时强制期望全支撑 (desired_contact = 1.0)
+# 确保站立时任何足部移动都会受到惩罚
+desired_contact[is_standing] = 1.0
+
+# 4. 计算惩罚
 penalty = 0
 for each foot:
     # 支撑相时有速度的惩罚（打滑）
-    penalty += desired_contact × (1 - exp(-velocity² / σ_vel))
+    penalty += -desired_contact × (1 - exp(-velocity² / σ_vel))
     
     # 解读:
     # - desired_contact: 支撑相权重（支撑相时接近1，摆动相时接近0）
