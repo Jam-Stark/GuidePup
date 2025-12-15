@@ -647,10 +647,14 @@ class ObservationsCfg:
         def __post_init__(self) -> None:
             self.enable_corruption = False
             self.concatenate_terms = True
-
+    
+    class predObs(ObsGroup):
+        """预测性观测组，留空占位"""
+        pass
     # observation groups
     policy: PolicyCfg = PolicyCfg()
     privileged: privilegedObs = privilegedObs()
+    pred: predObs = predObs()
 
 
 # 课程学习辅助函数
