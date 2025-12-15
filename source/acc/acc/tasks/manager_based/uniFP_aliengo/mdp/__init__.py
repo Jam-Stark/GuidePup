@@ -11,6 +11,8 @@ from .rewards import *  # noqa: F401, F403
 from .events import *  # noqa: F401, F403
 from .command_based_ik_action import CommandBasedIKAction  # noqa: F401
 from .command_based_ik_action_cfg import CommandBasedIKActionCfg  # noqa: F401
+from .actions import *  # noqa: F401, F403
+from .force_action import * # noqa: F401, F403
 
 # Import observation functions from parent directory
 from ..observation_compute import (  # noqa: F401
