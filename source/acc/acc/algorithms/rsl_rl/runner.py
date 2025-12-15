@@ -3,232 +3,116 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-import time
+from __future__ import annotations
+
 import os
-from collections import deque
-import statistics
+import warnings
 import torch
-from torch.utils.tensorboard import SummaryWriter
-import wandb
-from datetime import datetime
 
 from rsl_rl.runners import OnPolicyRunner
 from rsl_rl.env import VecEnv
+from rsl_rl.modules import ActorCritic, ActorCriticRecurrent, resolve_rnd_config, resolve_symmetry_config
 
 from .modules import AsymmetricActorCritic
 from .algorithm import PPOAdaptation
 
+
 class OnPolicyRunnerAdaptation(OnPolicyRunner):
-    def __init__(self, env: VecEnv, train_cfg, log_dir=None, device='cpu'):
-        self.cfg = train_cfg["runner"]
-        self.alg_cfg = train_cfg["algorithm"]
-        self.policy_cfg = train_cfg["policy"]
-        self.all_cfg = train_cfg
-        self.device = device
-        self.env = env
-        
-        # Initialize custom ActorCritic
-        # Note: We assume num_critic_obs is the same as num_privileged_obs
-        self.actor_critic = AsymmetricActorCritic(
-            num_actor_obs=self.env.num_obs,
-            num_critic_obs=self.env.num_privileged_obs,
-            num_actions=self.env.num_actions,
-            **self.policy_cfg
-        ).to(self.device)
-        
-        # Initialize custom Algorithm
-        self.alg = PPOAdaptation(self.actor_critic, device=self.device, **self.alg_cfg)
-        
-        self.num_steps_per_env = self.cfg["num_steps_per_env"]
-        self.save_interval = self.cfg["save_interval"]
+    def _construct_algorithm(self, obs):
+        """Construct PPOAdaptation + AsymmetricActorCritic for Isaac Lab (TensorDict obs)."""
 
-        # Init storage
-        self.alg.init_storage(
-            self.env.num_envs, 
-            self.num_steps_per_env, 
-            [self.env.num_obs], 
-            [self.env.num_privileged_obs], 
-            [self.env.num_actions]
+        # resolve RND config
+        self.alg_cfg = resolve_rnd_config(self.alg_cfg, obs, self.cfg["obs_groups"], self.env)
+        if self.alg_cfg.get("rnd_cfg") is not None:
+            raise NotImplementedError("PPOAdaptation.update currently doesn't train RND. Disable rnd_cfg for now.")
+
+        # resolve symmetry config
+        self.alg_cfg = resolve_symmetry_config(self.alg_cfg, self.env)
+        if self.alg_cfg.get("symmetry_cfg") is not None:
+            warnings.warn("PPOAdaptation ignores symmetry loss/augmentation in update().", stacklevel=2)
+
+        # resolve deprecated normalization config
+        if self.cfg.get("empirical_normalization") is not None:
+            warnings.warn(
+                "The `empirical_normalization` parameter is deprecated. Please set `actor_obs_normalization` and "
+                "`critic_obs_normalization` as part of the `policy` configuration instead.",
+                DeprecationWarning,
+            )
+            if self.policy_cfg.get("actor_obs_normalization") is None:
+                self.policy_cfg["actor_obs_normalization"] = self.cfg["empirical_normalization"]
+            if self.policy_cfg.get("critic_obs_normalization") is None:
+                self.policy_cfg["critic_obs_normalization"] = self.cfg["empirical_normalization"]
+
+        # Choose policy implementation.
+        policy_class_name = self.policy_cfg.pop("class_name", "ActorCritic")
+        want_adaptation_policy = policy_class_name == "AsymmetricActorCritic" or any(
+            key in self.policy_cfg
+            for key in (
+                "latent_dim",
+                "history_encoder_hidden_dims",
+                "state_estimator_hidden_dims",
+                "history_num_frames",
+                "obs_curr_dim",
+                "obs_pred_target_obs_group",
+            )
         )
-
-        # Logging setup
-        self.log_dir = log_dir
-        self.writer = None
-        self.tot_timesteps = 0
-        self.tot_time = 0
-        self.current_learning_iteration = 0
-        self.total_reward = 0
-        
-        # WandB name
-        self.wandb_run_name = (
-            datetime.now().strftime("%b%d_%H-%M-%S")
-            + "_"
-            + self.cfg.get("experiment_name", "experiment")
-            + "_"
-            + self.cfg.get("run_name", "run")
-        )
-
-        _, _ = self.env.reset()
-    
-    def learn(self, num_learning_iterations, init_at_random_ep_len=False):
-        # Initialize writer
-        if self.log_dir is not None and self.writer is None:
-            # Only init wandb if configured (optional)
-            # wandb.init(
-            #     project="UniFP",
-            #     sync_tensorboard=True,
-            #     name=self.wandb_run_name,
-            #     config=self.all_cfg,
-            # )
-            self.writer = SummaryWriter(log_dir=self.log_dir, flush_secs=10)
-            
-        if init_at_random_ep_len:
-            self.env.episode_length_buf = torch.randint_like(self.env.episode_length_buf, high=int(self.env.max_episode_length))
-        
-        # Initial observation
-        # Isaac Lab RslRlVecEnvWrapper.get_observations() returns (obs, privileged_obs)
-        obs, privileged_obs = self.env.get_observations()
-        obs, privileged_obs = obs.to(self.device), privileged_obs.to(self.device)
-        
-        # For adaptation, we assume the target (obs_pred) is the privileged_obs
-        obs_pred = privileged_obs 
-        
-        self.alg.actor_critic.train()
-
-        ep_infos = []
-        rewbuffer = deque(maxlen=100)
-        lenbuffer = deque(maxlen=100)
-        cur_reward_sum = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
-        cur_episode_length = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
-
-        tot_iter = self.current_learning_iteration + num_learning_iterations
-        for it in range(self.current_learning_iteration, tot_iter):
-            start = time.time()
-            # Rollout
-            with torch.inference_mode():
-                for i in range(self.num_steps_per_env):
-                    # Action selection
-                    actions = self.alg.act(obs, privileged_obs, obs_pred)
-                    
-                    # Optional: Get latent for debugging or analysis if needed
-                    # with torch.no_grad():
-                    #     latent = self.alg.actor_critic.get_student_latent(obs)
-                    
-                    # Step environment
-                    # Isaac Lab returns: obs, privileged_obs, rewards, dones, extras
-                    obs, privileged_obs, rewards, dones, extras = self.env.step(actions)
-                    
-                    obs = obs.to(self.device)
-                    privileged_obs = privileged_obs.to(self.device)
-                    rewards = rewards.to(self.device)
-                    dones = dones.to(self.device)
-                    
-                    # Update obs_pred target
-                    obs_pred = privileged_obs
-                    
-                    # Process step
-                    self.alg.process_env_step(rewards, dones, extras)
-                    
-                    if self.log_dir is not None:
-                        # Book keeping
-                        if 'episode' in extras:
-                            ep_infos.append(extras['episode'])
-                        cur_reward_sum += rewards
-                        cur_episode_length += 1
-                        new_ids = (dones > 0).nonzero(as_tuple=False)
-                        rewbuffer.extend(cur_reward_sum[new_ids][:, 0].cpu().numpy().tolist())
-                        lenbuffer.extend(cur_episode_length[new_ids][:, 0].cpu().numpy().tolist())
-                        cur_reward_sum[new_ids] = 0
-                        cur_episode_length[new_ids] = 0
-
-                stop = time.time()
-                collection_time = stop - start
-
-                # Learning step
-                start = stop
-                self.alg.compute_returns(privileged_obs)
-            
-            # Update
-            mean_value_loss, mean_surrogate_loss, mean_adaptation_module_loss, mean_adaptation_losses_dict = self.alg.update()
-            
-            stop = time.time()
-            learn_time = stop - start
-            
-            if self.log_dir is not None:
-                self.log(locals())
-            if it % self.save_interval == 0:
-                self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(it)))
-            ep_infos.clear()
-        
-        self.current_learning_iteration += num_learning_iterations
-        self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(self.current_learning_iteration)))
-
-    def log(self, locs, width=80, pad=35):
-        self.tot_timesteps += self.num_steps_per_env * self.env.num_envs
-        self.tot_time += locs['collection_time'] + locs['learn_time']
-        iteration_time = locs['collection_time'] + locs['learn_time']
-
-        ep_string = f''
-        if locs['ep_infos']:
-            for key in locs['ep_infos'][0]:
-                infotensor = torch.tensor([], device=self.device)
-                for ep_info in locs['ep_infos']:
-                    # handle scalar and zero dimensional tensor infos
-                    if not isinstance(ep_info[key], torch.Tensor):
-                        ep_info[key] = torch.Tensor([ep_info[key]])
-                    if len(ep_info[key].shape) == 0:
-                        ep_info[key] = ep_info[key].unsqueeze(0)
-                    infotensor = torch.cat((infotensor, ep_info[key].to(self.device)))
-                value = torch.mean(infotensor)
-                self.writer.add_scalar('Episode/' + key, value, locs['it'])
-                ep_string += f"""{f'Mean episode {key}:':>{pad}} {value:.4f}\n"""
-        mean_std = self.alg.actor_critic.std.mean()
-        fps = int(self.num_steps_per_env * self.env.num_envs / (locs['collection_time'] + locs['learn_time']))
-
-        self.writer.add_scalar('Loss/value_function', locs['mean_value_loss'], locs['it'])
-        self.writer.add_scalar('Loss/surrogate', locs['mean_surrogate_loss'], locs['it'])
-        self.writer.add_scalar('Loss/adaptation_module', locs['mean_adaptation_module_loss'], locs['it'])
-
-        self.writer.add_scalar('Loss/learning_rate', self.alg.learning_rate, locs['it'])
-        self.writer.add_scalar('Policy/mean_noise_std', mean_std.item(), locs['it'])
-        self.writer.add_scalar('Perf/total_fps', fps, locs['it'])
-        self.writer.add_scalar('Perf/collection time', locs['collection_time'], locs['it'])
-        self.writer.add_scalar('Perf/learning_time', locs['learn_time'], locs['it'])
-        if len(locs['rewbuffer']) > 0:
-            self.writer.add_scalar('Train/mean_reward', statistics.mean(locs['rewbuffer']), locs['it'])
-            self.writer.add_scalar('Train/mean_episode_length', statistics.mean(locs['lenbuffer']), locs['it'])
-            self.writer.add_scalar('Train/mean_reward/time', statistics.mean(locs['rewbuffer']), self.tot_time)
-            self.writer.add_scalar('Train/mean_episode_length/time', statistics.mean(locs['lenbuffer']), self.tot_time)
-
-        str = f" \033[1m Learning iteration {locs['it']}/{self.current_learning_iteration + locs['num_learning_iterations']} \033[0m "
-
-        if len(locs['rewbuffer']) > 0:
-            log_string = (f"""{'#' * width}\n"""
-                          f"""{str.center(width, ' ')}\n\n"""
-                          f"""{'Computation:':>{pad}} {fps:.0f} steps/s (collection: {locs[
-                            'collection_time']:.3f}s, learning {locs['learn_time']:.3f}s)\n"""
-                          f"""{'Value function loss:':>{pad}} {locs['mean_value_loss']:.4f}\n"""
-                          f"""{'Surrogate loss:':>{pad}} {locs['mean_surrogate_loss']:.4f}\n"""
-                          f"""{'Adaptation loss:':>{pad}} {locs['mean_adaptation_module_loss']:.4f}\n"""
-                          f"""{'Mean action noise std:':>{pad}} {mean_std.item():.2f}\n"""
-                          f"""{'Mean reward:':>{pad}} {statistics.mean(locs['rewbuffer']):.2f}\n"""
-                          f"""{'Mean episode length:':>{pad}} {statistics.mean(locs['lenbuffer']):.2f}\n""")
+        if want_adaptation_policy:
+            policy_cls = AsymmetricActorCritic
+        elif policy_class_name == "ActorCritic":
+            policy_cls = ActorCritic
+        elif policy_class_name == "ActorCriticRecurrent":
+            policy_cls = ActorCriticRecurrent
         else:
-            log_string = (f"""{'#' * width}\n"""
-                          f"""{str.center(width, ' ')}\n\n"""
-                          f"""{'Computation:':>{pad}} {fps:.0f} steps/s (collection: {locs[
-                            'collection_time']:.3f}s, learning {locs['learn_time']:.3f}s)\n"""
-                          f"""{'Value function loss:':>{pad}} {locs['mean_value_loss']:.4f}\n"""
-                          f"""{'Surrogate loss:':>{pad}} {locs['mean_surrogate_loss']:.4f}\n"""
-                          f"""{'Adaptation loss:':>{pad}} {locs['mean_adaptation_module_loss']:.4f}\n"""
-                          f"""{'Mean action noise std:':>{pad}} {mean_std.item():.2f}\n""")
+            raise ValueError(f"Unsupported policy.class_name='{policy_class_name}'.")
 
-        log_string += ep_string
-        log_string += (f"""{'-' * width}\n"""
-                       f"""{'Total timesteps:':>{pad}} {self.tot_timesteps}\n"""
-                       f"""{'Iteration time:':>{pad}} {iteration_time:.2f}s\n"""
-                       f"""{'Total time:':>{pad}} {self.tot_time:.2f}s\n"""
-                       f"""{'ETA:':>{pad}} {self.tot_time / (locs['it'] + 1) * (
-                               locs['num_learning_iterations'] - locs['it']):.1f}s\n""")
-        print(log_string)
-        self.total_reward = statistics.mean(locs['rewbuffer'])
+        policy = policy_cls(obs, self.cfg["obs_groups"], self.env.num_actions, **self.policy_cfg).to(self.device)
+
+        # Choose algorithm implementation.
+        alg_class_name = self.alg_cfg.pop("class_name", "PPO")
+        want_adaptation_alg = alg_class_name == "PPOAdaptation" or (
+            alg_class_name == "PPO"
+            and any(key in self.alg_cfg for key in ("adaptation_coef", "obs_pred_weights", "obs_pred_target_key"))
+        )
+        if want_adaptation_alg:
+            alg_cls = PPOAdaptation
+        else:
+            raise ValueError(
+                f"Unsupported algorithm.class_name='{alg_class_name}'. Use 'PPOAdaptation' for adaptation training."
+            )
+
+        alg = alg_cls(policy, device=self.device, **self.alg_cfg, multi_gpu_cfg=self.multi_gpu_cfg)
+
+        alg.init_storage(
+            "rl",
+            self.env.num_envs,
+            self.num_steps_per_env,
+            obs,
+            [self.env.num_actions],
+        )
+
+        return alg
+
+    def save(self, path: str, infos=None):
+        saved_dict = {
+            "model_state_dict": self.alg.policy.state_dict(),
+            "optimizer_state_dict": self.alg.optimizer.state_dict(),
+            "adaptation_optimizer_state_dict": self.alg.adaptation_optimizer.state_dict(),
+            "iter": self.current_learning_iteration,
+            "infos": infos,
+        }
+        torch.save(saved_dict, path)
+
+        # upload model to external logging service
+        if self.logger_type in ["neptune", "wandb"] and not self.disable_logs:
+            self.writer.save_model(path, self.current_learning_iteration)
+
+    def load(self, path: str, load_optimizer: bool = True, map_location: str | None = None):
+        loaded_dict = torch.load(path, weights_only=False, map_location=map_location)
+        resumed_training = self.alg.policy.load_state_dict(loaded_dict["model_state_dict"])
+        if load_optimizer and resumed_training:
+            self.alg.optimizer.load_state_dict(loaded_dict["optimizer_state_dict"])
+            if "adaptation_optimizer_state_dict" in loaded_dict:
+                self.alg.adaptation_optimizer.load_state_dict(loaded_dict["adaptation_optimizer_state_dict"])
+        if resumed_training:
+            self.current_learning_iteration = loaded_dict["iter"]
+        return loaded_dict.get("infos")
