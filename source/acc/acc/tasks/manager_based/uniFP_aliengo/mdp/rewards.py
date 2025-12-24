@@ -13,9 +13,8 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.sensors import RayCaster
 from isaaclab.utils.math import quat_apply, wrap_to_pi
 
-from observation_compute import stance_mask, compute_ref_dof
-from utils import (
-    base_forces_local,
+from .observation_compute import stance_mask, compute_ref_dof
+from .utils import (
     base_yaw_to_world,
     get_base_yaw_quat,
     get_body_pos_w,
@@ -27,6 +26,22 @@ from utils import (
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
+
+
+def _term_slice(action_manager, term_name: str) -> slice:
+    names = action_manager.active_terms
+    dims = action_manager.action_term_dim
+    idx = names.index(term_name)
+    start = sum(dims[:idx])
+    return slice(start, start + dims[idx])
+
+
+def joint_action_rate_l2(env: ManagerBasedRLEnv, action_term_name: str) -> torch.Tensor:
+    sl = _term_slice(env.action_manager, action_term_name)
+    current_action = env.action_manager.action[:, sl]
+    prev_action = env.action_manager.prev_action[:, sl]
+    return torch.sum(torch.square(current_action - prev_action), dim=1)
+
 
 
 def feet_contact_number(
@@ -202,7 +217,7 @@ def tracking_ee_force_world(
     force_command_name: str = "gripper_force_ext",
     gripper_force_command_name: str = "gripper_force_command",
     gripper_impedance_command_name: str = "gripper_impedance_command",
-    tracking_sigma: float = 0.1,
+    tracking_ee_sigma: float = 0.1,
     ) -> torch.Tensor:
     """Reward tracking EE position with force-offset goal in world frame."""
     base_yaw_quat = get_base_yaw_quat(env)
@@ -231,12 +246,25 @@ def tracking_ee_force_world(
 
     ee_pos_w = get_body_pos_w(env, gripper_cfg)
     ee_pos_error = torch.sum(torch.abs(ee_pos_w - curr_goal_w_offset), dim=1)
-    return torch.exp(-ee_pos_error / tracking_sigma * 2.0)
+    return torch.exp(-ee_pos_error / tracking_ee_sigma * 2.0)
 
 
-def ref_dof_leg(env: ManagerBasedRLEnv, sigma: float = 0.1) -> torch.Tensor:
+def ref_dof_leg(
+    env: ManagerBasedRLEnv,
+    sigma: float = 0.1,
+    gait_command_name: str = "gait_phase",
+    target_joint_pos_thd: float = 0.1,
+    target_joint_pos_scale: float = 0.35,
+    calf_scale_factor: float = 2.0,
+) -> torch.Tensor:
     """Calculates the reward based on the difference between the current joint positions and the target joint positions."""
-    ref_dof = compute_ref_dof()
+    ref_dof = compute_ref_dof(
+        env,
+        target_joint_pos_thd=target_joint_pos_thd,
+        target_joint_pos_scale=target_joint_pos_scale,
+        calf_scale_factor=calf_scale_factor,
+        gait_command_name=gait_command_name,
+    )
     robot: Articulation = env.scene["robot"]
     current = robot.data.joint_pos[:, env._unifp_leg_joint_ids]
     dof_error = torch.sum(torch.square(current - ref_dof), dim=1)
@@ -628,14 +656,10 @@ def joint_torques_l1(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEn
 def soft_torque_limits(
     env: ManagerBasedRLEnv,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
-    soft_limit: float | None = None,
+    soft_limit: float = 0.9,
 ) -> torch.Tensor:
     """Penalize joint torques that exceed a soft fraction of simulation joint effort limits."""
     asset: Articulation = env.scene[asset_cfg.name]
-    if soft_limit is None:
-        soft_limit = env.cfg.rewards.soft_torque_limit
-    if soft_limit <= 0.0:
-        return torch.zeros(asset.data.applied_torque.shape[0], device=asset.device)
 
     applied_torque = asset.data.applied_torque[:, asset_cfg.joint_ids]
 
@@ -997,9 +1021,9 @@ def reward_feet_height(
     奖励足部高度（与原VBC逻辑一致）
     
     此奖励仅在行走状态下生效，站立时返回0。
-    使用L2范数计算所有足部高度的综合度量，鼓励足部抬高。
+    使用最大足高作为度量，鼓励至少一只脚抬高。
     
-    计算逻辑：clamp(||[h1, h2, h3, h4]|| - target_height, max=0)
+    计算逻辑：clamp(max(h1, h2, h3, h4) - target_height, max=0)
     - 当足部整体高度低于目标时，给予负奖励（惩罚）
     - 当足部整体高度达到或超过目标时，奖励为0
     
@@ -1015,8 +1039,7 @@ def reward_feet_height(
         
     Note:
         - 只在行走状态下计算（站立时返回0）
-        - 使用L2范数：sqrt(h1² + h2² + h3² + h4²)
-        - 与原VBC实现完全一致
+        - 使用最大足高
         - 配合正权重使用（如 weight=1.0）
     """
     robot: Articulation = env.scene[asset_cfg.name]
@@ -1030,7 +1053,8 @@ def reward_feet_height(
     
     # 计算L2范数并与目标比较
     # clamp(||feet_height|| - target, max=0) -> 返回负值或0
-    reward = torch.clamp(torch.max(foot_heights, dim=-1) - target_height, max=0.0)
+    max_height = torch.max(foot_heights, dim=-1).values
+    reward = torch.clamp(max_height - target_height, max=0.0)
     
     # 获取 walking mask - 只在行走时应用此奖励
     locomotion_command_term = env.command_manager._terms[command_name]

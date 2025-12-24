@@ -549,24 +549,30 @@ class my_randomize_rigid_body_mass(ManagerTermBase):
             raise ValueError(f"Unknown distribution: {distribution}")
             
         # 2. 应用随机化 (Apply Randomization)
-        # 使用 default_mass 作为基准，确保可重复性和稳定性
-        masses = self.asset.data.default_mass[env_ids[:, None], body_ids].clone()
+        # 获取所有刚体的质量 (num_envs, num_bodies)
+        masses = self.asset.root_physx_view.get_masses()
+        
+        # 提取要修改的部分 (基于 default_mass)
+        masses_to_modify = self.asset.data.default_mass[env_ids[:, None], body_ids].clone()
         
         # 扩展噪声维度以匹配 (num_envs, num_bodies)
         noise_expanded = noise.unsqueeze(-1).expand(len(env_ids), len(body_ids))
         
         if operation == "add":
-            masses += noise_expanded
+            masses_to_modify += noise_expanded
         elif operation == "scale":
-            masses *= noise_expanded
+            masses_to_modify *= noise_expanded
         elif operation == "abs":
-            masses = noise_expanded
+            masses_to_modify = noise_expanded
             
         # 确保质量为正值
-        masses = torch.clamp(masses, min=min_mass)
+        masses_to_modify = torch.clamp(masses_to_modify, min=min_mass)
         
-        # 设置到物理仿真
-        self.asset.root_physx_view.set_masses(masses, env_ids)
+        # 更新完整质量张量
+        masses[env_ids[:, None], body_ids] = masses_to_modify
+        
+        # 设置到物理仿真 (传入对应环境的完整刚体质量)
+        self.asset.root_physx_view.set_masses(masses[env_ids], env_ids)
         
         # 3. 重新计算惯性张量 (Recompute Inertia)
         if recompute_inertia:
@@ -574,18 +580,23 @@ class my_randomize_rigid_body_mass(ManagerTermBase):
             default_masses = self.asset.data.default_mass[env_ids[:, None], body_ids]
             # 避免除以零
             default_masses = torch.clamp(default_masses, min=1e-6)
-            ratios = masses / default_masses
+            ratios = masses_to_modify / default_masses
+            
+            # 获取所有惯性张量
+            inertias = self.asset.root_physx_view.get_inertias()
             
             # 获取默认惯性张量并缩放
             if isinstance(self.asset, Articulation):
                 # Articulation inertia shape: (num_envs, num_bodies, 9)
-                inertias = self.asset.data.default_inertia[env_ids[:, None], body_ids] * ratios[..., None]
-                self.asset.root_physx_view.set_inertias(inertias, env_ids)
+                # 更新选定刚体的惯性张量
+                inertias[env_ids[:, None], body_ids] = (
+                    self.asset.data.default_inertia[env_ids[:, None], body_ids] * ratios[..., None]
+                )
+                self.asset.root_physx_view.set_inertias(inertias[env_ids], env_ids)
             else:
                 # RigidObject inertia shape: (num_envs, 9)
-                # 注意：RigidObject通常只有一个body，或者所有body共享属性，这里简化处理
-                inertias = self.asset.data.default_inertia[env_ids] * ratios.squeeze(-1)
-                self.asset.root_physx_view.set_inertias(inertias, env_ids)
+                inertias[env_ids] = self.asset.data.default_inertia[env_ids] * ratios.squeeze(-1)
+                self.asset.root_physx_view.set_inertias(inertias[env_ids], env_ids)
         
         # 4. 缓存采样参数 (Cache Parameters)
         # 缓存的是采样的噪声值 (noise)，而不是最终质量

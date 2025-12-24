@@ -496,13 +496,19 @@ def compute_ref_dof(
     return ref_dof_pos
 
 
-def ref_dof_pos_error(env: ManagerBasedRLEnv, **kwargs) -> torch.Tensor:
+def ref_dof_pos_error(env: ManagerBasedRLEnv, gait_command_name: str, target_joint_pos_thd: float, target_joint_pos_scale: float, calf_scale_factor: float) -> torch.Tensor:
     """Returns reference minus current for the 12 leg joints.
 
     This is typically used as a privileged observation to expose the tracking error
     against an open-loop gait reference in joint space.
     """
-    ref = compute_ref_dof(env, **kwargs)
+    ref = compute_ref_dof(
+        env,
+        target_joint_pos_thd=target_joint_pos_thd,
+        target_joint_pos_scale=target_joint_pos_scale,
+        calf_scale_factor=calf_scale_factor,
+        gait_command_name=gait_command_name,
+    )
     robot: Articulation = env.scene["robot"]
     current = robot.data.joint_pos[:, env._unifp_leg_joint_ids]
     return ref - current

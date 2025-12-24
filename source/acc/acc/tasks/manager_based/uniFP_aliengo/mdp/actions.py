@@ -9,26 +9,6 @@ from isaaclab.assets import Articulation, RigidObject
 from isaaclab.utils import configclass
 from isaaclab.envs import ManagerBasedEnv
 
-@configclass
-class VariableForceActionCfg(ActionTermCfg):
-    """Configuration for the variable force action term."""
-    class_type = None # Will be set to VariableForceAction
-    asset_name: str = "robot"
-    body_name: str | None = "base"
-    
-    # Parameters from ForceAction.md (seconds preferred; *_steps kept for fallback)
-    push_interval_range_s: tuple[float, float] | None = (3.5, 9.0)  # Trigger interval in seconds
-    duration_range_s: tuple[float, float] | None = (1.0, 3.0)     # Ramp duration in seconds
-    settling_time_s: float | None = 1.0                             # Hold time in seconds
-
-    push_interval_range: tuple[int, int] = (175, 450) # Trigger interval in env steps (≈3.5–9.0s at 20ms/step)
-    force_range: tuple[float, float] = (-50.0, 50.0) # Range for force magnitude
-    duration_range: tuple[int, int] = (50, 150) # Ramp duration in env steps (≈1.0–3.0s at 20ms/step)
-    settling_time_steps: int = 50 # Hold time in env steps (≈1.0s at 20ms/step)
-    prob_freed: float = 0.2 # Probability of being freed
-    
-    dim: int = 0 # Not using agent actions
-
 class VariableForceAction(ActionTerm):
     """
     Action term that applies a variable external force (trapezoidal profile) to a rigid body.
@@ -317,21 +297,26 @@ class VariableForceAction(ActionTerm):
             body_ids=self._body_idx
         )
 
-
-VariableForceActionCfg.class_type = VariableForceAction
-
-
 @configclass
-class ApplyForceCommandActionCfg(ActionTermCfg):
-    """Apply a 3D force command to a body every physics step."""
-
-    class_type = None  # will be set to ApplyForceCommandAction
-
+class VariableForceActionCfg(ActionTermCfg):
+    """Configuration for the variable force action term."""
+    class_type = VariableForceAction
     asset_name: str = "robot"
-    body_name: str | None = MISSING
-    command_name: str = MISSING
-    is_global: bool = False
-    dim: int = 0
+    body_name: str | None = "base"
+    
+    # Parameters from ForceAction.md (seconds preferred; *_steps kept for fallback)
+    push_interval_range_s: tuple[float, float] | None = (3.5, 9.0)  # Trigger interval in seconds
+    duration_range_s: tuple[float, float] | None = (1.0, 3.0)     # Ramp duration in seconds
+    settling_time_s: float | None = 1.0                             # Hold time in seconds
+
+    push_interval_range: tuple[int, int] = (175, 450) # Trigger interval in env steps (≈3.5–9.0s at 20ms/step)
+    force_range: tuple[float, float] = (-50.0, 50.0) # Range for force magnitude
+    duration_range: tuple[int, int] = (50, 150) # Ramp duration in env steps (≈1.0–3.0s at 20ms/step)
+    settling_time_steps: int = 50 # Hold time in env steps (≈1.0s at 20ms/step)
+    prob_freed: float = 0.2 # Probability of being freed
+    
+    dim: int = 0 # Not using agent actions
+
 
 
 class ApplyForceCommandAction(ActionTerm):
@@ -391,5 +376,15 @@ class ApplyForceCommandAction(ActionTerm):
             is_global=self._is_global,
         )
 
+@configclass
+class ApplyForceCommandActionCfg(ActionTermCfg):
+    """Apply a 3D force command to a body every physics step."""
 
-ApplyForceCommandActionCfg.class_type = ApplyForceCommandAction
+    class_type = ApplyForceCommandAction
+
+    asset_name: str = "robot"
+    body_name: str | None = MISSING
+    command_name: str = MISSING
+    is_global: bool = False
+    dim: int = 0
+

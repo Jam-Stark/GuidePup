@@ -22,7 +22,7 @@ class GaitPhaseCommandCfg(CommandTermCfg):
     class_type: type = GaitPhaseCommand
 
     # Disable the built-in time_left resampling; this term manages its own per-step update.
-    resampling_time_range: tuple[float, float] = (math.inf, math.inf)
+    resampling_time_range: tuple[float, float] = (9e9, 9e9)
 
     locomotion_command_name: str = "locomotion_commands"
     """Name of the locomotion command term used to query standing environments."""

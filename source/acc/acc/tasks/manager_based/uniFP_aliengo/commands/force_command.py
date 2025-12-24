@@ -12,28 +12,6 @@ if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
 
 
-@configclass
-class VariableForceCommandCfg(CommandTermCfg):
-    """Configuration for variable force command generation (trapezoidal profile)."""
-
-    class_type = None  # will be set to VariableForceCommand
-
-    # Disable the built-in time_left resampling; this term manages its own schedule.
-    resampling_time_range: tuple[float, float] = (math.inf, math.inf)
-
-    # Seconds-based parameters (preferred); step-based parameters kept as fallback.
-    push_interval_range_s: tuple[float, float] | None = (3.5, 9.0)
-    duration_range_s: tuple[float, float] | None = (1.0, 3.0)
-    settling_time_s: float | None = 1.0
-
-    push_interval_range: tuple[int, int] = (175, 450)
-    duration_range: tuple[int, int] = (50, 150)
-    settling_time_steps: int = 50
-
-    force_range: tuple[float, float] = (-50.0, 50.0)
-    prob_freed: float = 0.2
-
-
 class VariableForceCommand(CommandTerm):
     """Generates a per-env 3D force command with a trapezoidal time profile."""
 
@@ -194,5 +172,25 @@ class VariableForceCommand(CommandTerm):
         return torch.tensor(list(env_ids), device=self.device, dtype=torch.long)
 
 
-VariableForceCommandCfg.class_type = VariableForceCommand
+@configclass
+class VariableForceCommandCfg(CommandTermCfg):
+    """Configuration for variable force command generation (trapezoidal profile)."""
+
+    class_type = VariableForceCommand
+
+    # Disable the built-in time_left resampling; this term manages its own schedule.
+    resampling_time_range: tuple[float, float] = (9e9, 9e9)
+
+    # Seconds-based parameters (preferred); step-based parameters kept as fallback.
+    push_interval_range_s: tuple[float, float] | None = (3.5, 9.0)
+    duration_range_s: tuple[float, float] | None = (1.0, 3.0)
+    settling_time_s: float | None = 1.0
+
+    push_interval_range: tuple[int, int] = (175, 450)
+    duration_range: tuple[int, int] = (50, 150)
+    settling_time_steps: int = 50
+
+    force_range: tuple[float, float] = (-50.0, 50.0)
+    prob_freed: float = 0.2
+
 

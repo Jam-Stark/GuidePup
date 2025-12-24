@@ -37,6 +37,7 @@ class PPORunnerCfg(RslRlOnPolicyRunnerCfg):
     experiment_name = "uniFP_aliengo_position_force"
     policy = CustomPpoActorCriticCfg(
         init_noise_std=1.0,
+        noise_std_type="log",
         actor_obs_normalization=False,
         critic_obs_normalization=False,
         actor_hidden_dims=[512, 256, 128],
