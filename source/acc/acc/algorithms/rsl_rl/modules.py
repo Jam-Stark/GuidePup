@@ -34,6 +34,7 @@ class AsymmetricActorCritic(nn.Module):
         # Observation handling
         obs_curr_dim: int | None = None,
         history_num_frames: int = 32,
+        policy_history_only: bool = False,
         history_obs_normalization: bool = False,
         # Networks
         latent_dim: int = 64,
@@ -62,6 +63,7 @@ class AsymmetricActorCritic(nn.Module):
         self.latent_dim = int(latent_dim)
         self.prediction_dim = int(prediction_dim)
         self.history_num_frames = int(history_num_frames)
+        self.policy_history_only = bool(policy_history_only)
 
         # Resolve critic input dim from configured groups.
         self.critic_groups = obs_groups.get("critic", [])
@@ -81,22 +83,32 @@ class AsymmetricActorCritic(nn.Module):
             curr_in_dim = self._resolve_groups_dim(obs, self.policy_groups)
             history_in_dim = self._resolve_groups_dim(obs, self.history_groups)
             self._split_policy_obs = None
+            self._policy_history_only = False
         else:
             # Option B: policy obs already contains [curr | history] and needs splitting.
             self.policy_groups = obs_groups.get("policy", [])
             if not self.policy_groups:
                 raise ValueError("obs_groups must contain a non-empty 'policy' list.")
             policy_total_dim = self._resolve_groups_dim(obs, self.policy_groups)
-            resolved_curr_dim = self._resolve_curr_dim_from_policy_total(policy_total_dim, obs_curr_dim)
-            curr_in_dim = resolved_curr_dim
-            history_in_dim = policy_total_dim - resolved_curr_dim
-            if history_in_dim <= 0:
-                raise ValueError(
-                    "Policy observation does not contain a history tail. "
-                    f"Got policy_total_dim={policy_total_dim}, resolved obs_curr_dim={resolved_curr_dim}."
-                )
-            self.history_groups = []
-            self._split_policy_obs = (resolved_curr_dim, history_in_dim)
+            if self.policy_history_only:
+                resolved_curr_dim = self._resolve_curr_dim_history_only(policy_total_dim, obs_curr_dim)
+                curr_in_dim = resolved_curr_dim
+                history_in_dim = policy_total_dim
+                self.history_groups = []
+                self._split_policy_obs = None
+                self._policy_history_only = True
+            else:
+                resolved_curr_dim = self._resolve_curr_dim_with_current(policy_total_dim, obs_curr_dim)
+                curr_in_dim = resolved_curr_dim
+                history_in_dim = policy_total_dim - resolved_curr_dim
+                if history_in_dim <= 0:
+                    raise ValueError(
+                        "Policy observation does not contain a history tail. "
+                        f"Got policy_total_dim={policy_total_dim}, resolved obs_curr_dim={resolved_curr_dim}."
+                    )
+                self.history_groups = []
+                self._split_policy_obs = (resolved_curr_dim, history_in_dim)
+                self._policy_history_only = False
 
         self.curr_obs_dim = int(curr_in_dim)
         self.history_obs_dim = int(history_in_dim)
@@ -158,7 +170,30 @@ class AsymmetricActorCritic(nn.Module):
             dim += int(obs[group].shape[-1])
         return dim
 
-    def _resolve_curr_dim_from_policy_total(self, policy_total_dim: int, obs_curr_dim: int | None) -> int:
+    def _resolve_curr_dim_history_only(self, policy_total_dim: int, obs_curr_dim: int | None) -> int:
+        if obs_curr_dim is not None:
+            resolved = int(obs_curr_dim)
+            if resolved <= 0:
+                raise ValueError(f"Invalid obs_curr_dim={resolved}. Expected obs_curr_dim > 0.")
+            expected_total = self.history_num_frames * resolved
+            if policy_total_dim != expected_total:
+                raise ValueError(
+                    "Policy history-only layout mismatch. "
+                    f"Expected policy_total_dim={expected_total} (history_num_frames={self.history_num_frames} "
+                    f"* obs_curr_dim={resolved}), got {policy_total_dim}."
+                )
+            return resolved
+
+        if self.history_num_frames > 0 and policy_total_dim % self.history_num_frames == 0:
+            return policy_total_dim // self.history_num_frames
+
+        raise ValueError(
+            "Unable to infer obs_curr_dim for history-only policy observations. "
+            f"Got policy_total_dim={policy_total_dim}, history_num_frames={self.history_num_frames}. "
+            "Please set obs_curr_dim in the policy cfg."
+        )
+
+    def _resolve_curr_dim_with_current(self, policy_total_dim: int, obs_curr_dim: int | None) -> int:
         if obs_curr_dim is not None:
             resolved = int(obs_curr_dim)
             if resolved <= 0 or resolved >= policy_total_dim:
@@ -206,13 +241,18 @@ class AsymmetricActorCritic(nn.Module):
         return torch.cat([obs[group] for group in groups], dim=-1) if len(groups) > 1 else obs[groups[0]]
 
     def _get_curr_and_history_obs(self, obs: TensorDict) -> tuple[torch.Tensor, torch.Tensor]:
-        if self._split_policy_obs is None:
+        if self._split_policy_obs is None and not self._policy_history_only:
             curr = self._cat_obs_groups(obs, self.policy_groups)
             history = self._cat_obs_groups(obs, self.history_groups)
             return curr, history
 
-        curr_dim, _history_dim = self._split_policy_obs
         policy_vec = self._cat_obs_groups(obs, self.policy_groups)
+        if self._policy_history_only:
+            curr = policy_vec[:, -self.curr_obs_dim :]
+            history = policy_vec
+            return curr, history
+
+        curr_dim, _history_dim = self._split_policy_obs
         curr = policy_vec[:, :curr_dim]
         history = policy_vec[:, curr_dim:]
         return curr, history

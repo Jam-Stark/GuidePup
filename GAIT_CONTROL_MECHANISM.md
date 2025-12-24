@@ -46,40 +46,45 @@
 
 ### 2.1 功能说明
 
-**函数名称**: `gait_clock_signal()`  
-**文件路径**: `source/acc/acc/tasks/manager_based/vbc/observation_compute.py`  
-**观测维度**: 4 维（每只脚一个信号）
+本项目将“步态相位”的状态统一交给 Isaac Lab Manager-Based 的 **CommandManager / CommandTerm** 管理：
+
+- **相位命令**: `gait_phase`（CommandTerm，输出相位 φ∈[0,1)）
+  - **实现**: `source/acc/acc/tasks/manager_based/uniFP_aliengo/commands/gait_phase_command.py`
+  - **配置**: `source/acc/acc/tasks/manager_based/uniFP_aliengo/unifpaliengo_env_cfg.py` 的 `CommandsCfg.gait_phase`
+- **观测函数**（由 `gait_phase` 派生，不再自行维护相位状态）:
+  - `gait_clock_signal()`：2 维 `[sin(2πφ), cos(2πφ)]`
+  - `gait_clock_signal_per_foot()`：4 维（每只脚一个正弦信号）
+  - **实现**: `source/acc/acc/tasks/manager_based/uniFP_aliengo/mdp/observation_compute.py`
 
 ### 2.2 工作原理
 
-#### 2.2.1 核心机制：状态化相位 (Stateful Phase)
+#### 2.2.1 核心机制：CommandTerm 持有相位 (Stateful Phase via Command)
 
-**改进点**：不再使用绝对时间反算相位，而是维护内部状态 `env.gait_indices`，支持暂停和重置。
+**改进点**：不再由 observation/reward 函数维护相位（避免调用顺序导致不一致），而是由 `gait_phase` 命令统一维护并在每个 env-step 更新一次。
 
 ```python
-# 1. 初始化或获取步态相位状态
-if not hasattr(env, "gait_indices"):
-    env.gait_indices = torch.zeros(env.num_envs)
+# gait_phase command 的核心更新逻辑（简化示意）:
+phase_inc = env.step_dt * gait_frequency
+phase = (phase + phase_inc) % 1.0
 
-# 2. 累加相位 (dt / cycle_time)
-dt = env.step_dt
-cycle_time = 1.0 / gait_frequency
-env.gait_indices = torch.remainder(env.gait_indices + dt / cycle_time, 1.0)
-
-# 3. 站立重置：当接收到站立指令时，重置相位为 0
-env.gait_indices[is_standing] = 0.0
+# 站立环境：冻结/重置相位为 0
+if locomotion_term.is_standing_env:
+    phase = 0.0
 ```
 
 #### 2.2.2 信号生成
 
 ```python
-# 足部相位分配
-gait_phase = env.gait_indices
+# 从命令管理器取相位
+gait_phase = env.command_manager.get_command("gait_phase")[:, 0]
+
+# 足部相位分配（对角小跑：FL/RR 相位偏移由 CommandsCfg.gait_phase.phase_offset 统一配置）
+phase_offset = env.command_manager.get_term("gait_phase").cfg.phase_offset
 foot_phases = [
-    (gait_phase + 0.5) % 1.0,  # FL (左前)
+    (gait_phase + phase_offset) % 1.0,  # FL (左前)
     gait_phase,                 # FR (右前)
     gait_phase,                 # RL (左后)
-    (gait_phase + 0.5) % 1.0,  # RR (右后)
+    (gait_phase + phase_offset) % 1.0,  # RR (右后)
 ]
 
 # 转换为正弦信号
@@ -100,13 +105,31 @@ final_signals = torch.where(
 ### 2.3 配置示例
 
 ```python
-# vbc_env_cfg.py - ObservationsCfg.PolicyCfg
+# unifpaliengo_env_cfg.py - CommandsCfg
+@configclass
+class CommandsCfg:
+    @configclass
+    class GaitPhaseCfg(GaitPhaseCommandCfg):
+        locomotion_command_name: str = "locomotion_commands"
+        gait_frequency: float = 2.0
+        phase_offset: float = 0.5
+        initial_phase: float = 0.0
+
+    gait_phase: GaitPhaseCfg = GaitPhaseCfg()
+
+# unifpaliengo_env_cfg.py - ObservationsCfg.PolicyCfg
 gait_clock = ObsTerm(
     func=mdp.gait_clock_signal,
     params={
-        "command_name": "locomotion_commands",  # 用于判断站立/行走状态
-        "gait_frequency": 2.0,                  # 2 Hz 步态频率
-        "phase_offset": 0.5,                    # 180° 相位偏移
+        "gait_command_name": "gait_phase",
+    }
+)
+
+# 如需每只脚一个时钟信号：
+gait_clock_per_foot = ObsTerm(
+    func=mdp.gait_clock_signal_per_foot,
+    params={
+        "gait_command_name": "gait_phase",
     }
 )
 ```
@@ -215,11 +238,11 @@ tracking_contacts_force = RewTerm(
 
 #### 3.3.2 惩罚计算
 
-**改进点**：使用统一的 `env.gait_indices` 状态，并显式强制站立时的接触期望。
+**改进点**：使用统一的 `gait_phase` 命令相位（`CommandTerm` 输出），并显式强制站立时的接触期望。
 
 ```python
-# 1. 获取统一相位
-gait_phase = env.gait_indices
+# 1. 获取统一相位（来自 command manager）
+gait_phase = env.command_manager.get_command("gait_phase")[:, 0]
 
 # 2. 计算期望接触概率 (Von Mises)
 von_mises = exp(κ × (cos(2π × foot_phases) - 1))

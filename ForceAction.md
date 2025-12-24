@@ -30,7 +30,17 @@ current_Fxyz: [N, 3]，当前这一帧应该输出的指令力（随时间变化
 
 commands: [N, D], 最终输入给神经网络的观测向量，包含上述计算出的力。
 
-2. 逻辑流程详解 (Step-by-Step)
+2. 时间单位与换算
+
+- 行为逻辑按“环境步”计时：`episode_length_buf` 每环境步 +1。
+- 一个环境步时长 `step_dt = env.step_dt`；若缺省则 `step_dt = sim.dt * decimation`。
+- 支持秒级配置并自动换算为步：
+  - `push_interval_range_s` → 触发间隔（秒）
+  - `duration_range_s` → 上升/下降段持续（秒）
+  - `settling_time_s` → 保持段（秒）
+- 若秒级字段为空，则使用旧的步数字段 `push_interval_range`、`duration_range`、`settling_time_steps` 作为回退。
+
+3. 逻辑流程详解 (Step-by-Step)
 
 该逻辑在每一个仿真步（Step）中执行。
 

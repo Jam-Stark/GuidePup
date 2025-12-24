@@ -168,11 +168,17 @@ class ExtendedUniformVelocityCommand(UniformVelocityCommand):
             # create markers if necessary for the first time
             if not hasattr(self, "goal_vel_visualizer"):
                 self.goal_vel_visualizer = VisualizationMarkers(self.cfg.goal_vel_visualizer_cfg)
+            if not hasattr(self, "current_vel_visualizer") and hasattr(self.cfg, "current_vel_visualizer_cfg"):
+                self.current_vel_visualizer = VisualizationMarkers(self.cfg.current_vel_visualizer_cfg)
             # set their visibility to true
             self.goal_vel_visualizer.set_visibility(True)
+            if hasattr(self, "current_vel_visualizer"):
+                self.current_vel_visualizer.set_visibility(True)
         else:
             if hasattr(self, "goal_vel_visualizer"):
                 self.goal_vel_visualizer.set_visibility(False)
+            if hasattr(self, "current_vel_visualizer"):
+                self.current_vel_visualizer.set_visibility(False)
 
     def _debug_vis_callback(self, event):
         """调试可视化回调 - 更新速度箭头位置和方向。"""
@@ -205,3 +211,9 @@ class ExtendedUniformVelocityCommand(UniformVelocityCommand):
         # display markers
         self.goal_vel_visualizer.visualize(base_pos_w, arrow_quat_w)
 
+        if hasattr(self, "current_vel_visualizer"):
+            vel_current = self.robot.data.root_lin_vel_b[:, :2]
+            yaw_current = torch.atan2(vel_current[:, 1], vel_current[:, 0])
+            zeros = torch.zeros_like(yaw_current)
+            current_quat_w = quat_from_euler_xyz(zeros, zeros, yaw_current)
+            self.current_vel_visualizer.visualize(base_pos_w, current_quat_w)

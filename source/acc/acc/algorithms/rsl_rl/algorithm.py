@@ -17,9 +17,9 @@ class PPOAdaptation(PPO):
     """PPO with an auxiliary weighted-MSE loss and dual optimizers.
 
     Optimizer split (per request):
-    - Opt1: actor + critic (+ action std parameter).
-    - Opt2: encoder + state_estimator.
-    The total loss is a single backward pass: L = L_PPO + λ * weighted_MSE.
+    - Opt1: actor + critic + encoder (+ action std parameter), updated by PPO loss.
+    - Opt2: encoder + state_estimator, updated by supervised loss only.
+    PPO and adaptation losses are backpropagated separately.
     """
 
     def __init__(
@@ -28,6 +28,7 @@ class PPOAdaptation(PPO):
         *,
         device: str = "cpu",
         adaptation_coef: float = 1.0,
+        adaptation_learning_rate: float = 1e-5,
         obs_pred_weights: list[float] | None = None,
         obs_pred_target_key: str = "obs_pred_targets",
         obs_pred_target_obs_group: str | None = None,
@@ -37,6 +38,7 @@ class PPOAdaptation(PPO):
         super().__init__(policy, device=device, **kwargs)
 
         self.adaptation_coef = float(adaptation_coef)
+        self.adaptation_learning_rate = float(adaptation_learning_rate)
         self.obs_pred_target_key = obs_pred_target_key
         self.obs_pred_target_obs_group = obs_pred_target_obs_group
 
@@ -57,8 +59,13 @@ class PPOAdaptation(PPO):
                 )
             self.obs_pred_weights = w
 
-        # Replace the default PPO optimizer with two disjoint optimizers.
-        actor_critic_params = list(self.policy.actor.parameters()) + list(self.policy.critic.parameters())
+        # Replace the default PPO optimizer with two optimizers.
+        # PPO optimizer updates actor + critic + encoder so RL gradients flow into the encoder.
+        actor_critic_params = (
+            list(self.policy.actor.parameters())
+            + list(self.policy.critic.parameters())
+            + list(self.policy.encoder.parameters())
+        )
         if getattr(self.policy, "noise_std_type", "scalar") == "scalar":
             actor_critic_params.append(self.policy.std)
         elif getattr(self.policy, "noise_std_type", "scalar") == "log":
@@ -70,8 +77,9 @@ class PPOAdaptation(PPO):
             )
         self.optimizer = optim.Adam(actor_critic_params, lr=self.learning_rate)
 
+        # Adaptation optimizer updates encoder + state estimator using only the supervised loss.
         adaptation_params = list(self.policy.encoder.parameters()) + list(self.policy.state_estimator.parameters())
-        self.adaptation_optimizer = optim.Adam(adaptation_params, lr=self.learning_rate)
+        self.adaptation_optimizer = optim.Adam(adaptation_params, lr=self.adaptation_learning_rate)
 
         # Use the extended transition so we can store supervised labels.
         self.transition = AdaptationRolloutStorage.Transition()
@@ -89,8 +97,8 @@ class PPOAdaptation(PPO):
 
     def _weighted_mse(self, prediction: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         # prediction/target: [batch, dim]
-        diff2 = (prediction - target).pow(2)
-        return (diff2 * self.obs_pred_weights).mean()
+        diff = (prediction - target) * self.obs_pred_weights
+        return diff.pow(2).mean()
 
     def act(self, obs):
         actions = super().act(obs)
@@ -220,8 +228,6 @@ class PPOAdaptation(PPO):
 
                     for param_group in self.optimizer.param_groups:
                         param_group["lr"] = self.learning_rate
-                    for param_group in self.adaptation_optimizer.param_groups:
-                        param_group["lr"] = self.learning_rate
 
             # Surrogate loss
             ratio = torch.exp(actions_log_prob_batch - torch.squeeze(old_actions_log_prob_batch))
@@ -244,17 +250,8 @@ class PPOAdaptation(PPO):
 
             loss = surrogate_loss + self.value_loss_coef * value_loss - self.entropy_coef * entropy_batch.mean()
 
-            # Auxiliary supervised loss (only on original samples, not on any augmented copies)
-            if self.adaptation_coef > 0.0:
-                obs_pred = self.policy.predict(obs_batch[:original_batch_size])
-                obs_pred_loss = self._weighted_mse(obs_pred, obs_pred_targets_batch)
-                loss = loss + self.adaptation_coef * obs_pred_loss
-            else:
-                obs_pred_loss = torch.tensor(0.0, device=self.device)
-
-            # Backward + step (single backward, two optimizers)
+            # PPO update
             self.optimizer.zero_grad()
-            self.adaptation_optimizer.zero_grad()
             loss.backward()
 
             # Collect gradients from all GPUs
@@ -263,7 +260,23 @@ class PPOAdaptation(PPO):
 
             nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
             self.optimizer.step()
-            self.adaptation_optimizer.step()
+
+            # Clear PPO grads before adaptation step
+            self.policy.zero_grad(set_to_none=True)
+
+            # Adaptation update (separate backward)
+            if self.adaptation_coef > 0.0:
+                self.adaptation_optimizer.zero_grad()
+                obs_pred = self.policy.predict(obs_batch[:original_batch_size])
+                obs_pred_loss = self._weighted_mse(obs_pred, obs_pred_targets_batch[:original_batch_size])
+                (self.adaptation_coef * obs_pred_loss).backward()
+
+                if self.is_multi_gpu:
+                    self.reduce_parameters()
+
+                self.adaptation_optimizer.step()
+            else:
+                obs_pred_loss = torch.tensor(0.0, device=self.device)
 
             mean_value_loss += float(value_loss.item())
             mean_surrogate_loss += float(surrogate_loss.item())

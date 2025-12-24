@@ -15,9 +15,12 @@ from typing import TYPE_CHECKING
 from isaaclab.assets import Articulation
 from isaaclab.managers import CommandTerm
 from isaaclab.markers import VisualizationMarkers, VisualizationMarkersCfg
-from isaaclab.utils.math import quat_from_euler_xyz, sample_uniform, quat_mul
+from isaaclab.utils.math import quat_from_euler_xyz, sample_uniform
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 import isaaclab.sim as sim_utils
+import isaaclab.utils.math as math_utils
+
+from ..mdp.utils import base_yaw_to_world, get_base_yaw_quat
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
@@ -48,6 +51,8 @@ class DynamicManipulationCommand(CommandTerm):
 
         # 获取机器人资产
         self.robot: Articulation = env.scene[cfg.asset_name]
+        body_ids, _ = self.robot.find_bodies(cfg.body_name)
+        self._ee_body_id = body_ids[0] if len(body_ids) > 0 else None
         
         # 命令缓冲区: [radius, pitch, yaw, quat_w, quat_x, quat_y, quat_z]
         self._command = torch.zeros(self.num_envs, 7, device=self.device)
@@ -558,94 +563,218 @@ class DynamicManipulationCommand(CommandTerm):
         return w1 * q1 + w2 * q2
 
     def _set_debug_vis_impl(self, debug_vis: bool):
-        """设置调试可视化 - 显示当前插值点、最终目标点和起点"""
+        """设置调试可视化 - 显示目标/位置与力控信息"""
         if debug_vis:
-            # 1. 当前插值点 marker (绿色球 - 表示机械臂当前应该到达的位置)
-            if not hasattr(self, "current_goal_markers"):
+            # 1. 目标/位置可视化
+            if not hasattr(self, "ee_goal_markers"):
                 marker_cfg = VisualizationMarkersCfg(
-                    prim_path="/Visuals/Command/DynamicManip/current_goal",
+                    prim_path="/Visuals/Command/EE/goal",
                     markers={
                         "sphere": sim_utils.UsdFileCfg(
                             usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Shapes/sphere.usd",
-                            scale=(0.2, 0.2, 0.2),
+                            scale=(0.06, 0.06, 0.06),
+                            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(1.0, 1.0, 0.0)),
+                        ),
+                    },
+                )
+                self.ee_goal_markers = VisualizationMarkers(marker_cfg)
+            self.ee_goal_markers.set_visibility(True)
+
+            if not hasattr(self, "ee_actual_markers"):
+                marker_cfg = VisualizationMarkersCfg(
+                    prim_path="/Visuals/Command/EE/actual",
+                    markers={
+                        "sphere": sim_utils.UsdFileCfg(
+                            usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Shapes/sphere.usd",
+                            scale=(0.06, 0.06, 0.06),
+                            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.05, 0.1, 0.6)),
+                        ),
+                    },
+                )
+                self.ee_actual_markers = VisualizationMarkers(marker_cfg)
+            self.ee_actual_markers.set_visibility(True)
+
+            if not hasattr(self, "ee_goal_offset_markers"):
+                marker_cfg = VisualizationMarkersCfg(
+                    prim_path="/Visuals/Command/EE/goal_offset",
+                    markers={
+                        "sphere": sim_utils.UsdFileCfg(
+                            usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Shapes/sphere.usd",
+                            scale=(0.06, 0.06, 0.06),
+                            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(1.0, 0.0, 1.0)),
+                        ),
+                    },
+                )
+                self.ee_goal_offset_markers = VisualizationMarkers(marker_cfg)
+            self.ee_goal_offset_markers.set_visibility(True)
+
+            # 2. 力控可视化
+            if not hasattr(self, "gripper_force_ext_markers"):
+                marker_cfg = VisualizationMarkersCfg(
+                    prim_path="/Visuals/Command/Force/gripper_ext",
+                    markers={
+                        "arrow": sim_utils.UsdFileCfg(
+                            usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/UIElements/arrow_x.usd",
+                            scale=(1.0, 1.0, 1.0),
+                            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 0.4, 1.0)),
+                        ),
+                    },
+                )
+                self.gripper_force_ext_markers = VisualizationMarkers(marker_cfg)
+            self.gripper_force_ext_markers.set_visibility(True)
+
+            if not hasattr(self, "gripper_force_cmd_markers"):
+                marker_cfg = VisualizationMarkersCfg(
+                    prim_path="/Visuals/Command/Force/gripper_cmd",
+                    markers={
+                        "arrow": sim_utils.UsdFileCfg(
+                            usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/UIElements/arrow_x.usd",
+                            scale=(1.0, 1.0, 1.0),
                             visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 1.0, 0.0)),
                         ),
                     },
                 )
-                self.current_goal_markers = VisualizationMarkers(marker_cfg)
-            self.current_goal_markers.set_visibility(True)
-            
-            # 2. 最终目标点 marker (红色球 - 表示轨迹的终点)
-            if not hasattr(self, "final_target_markers"):
+                self.gripper_force_cmd_markers = VisualizationMarkers(marker_cfg)
+            self.gripper_force_cmd_markers.set_visibility(True)
+
+            if not hasattr(self, "base_force_ext_markers"):
                 marker_cfg = VisualizationMarkersCfg(
-                    prim_path="/Visuals/Command/DynamicManip/final_target",
+                    prim_path="/Visuals/Command/Force/base_ext",
                     markers={
-                        "sphere": sim_utils.UsdFileCfg(
-                            usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Shapes/sphere.usd",
-                            scale=(0.2, 0.2, 0.2),
-                            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(1.0, 0.0, 0.0)),
+                        "arrow": sim_utils.UsdFileCfg(
+                            usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/UIElements/arrow_x.usd",
+                            scale=(1.0, 1.0, 1.0),
+                            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 0.4, 1.0)),
                         ),
                     },
                 )
-                self.final_target_markers = VisualizationMarkers(marker_cfg)
-            self.final_target_markers.set_visibility(True)
-            
-            # 3. 起点 marker (蓝色球 - 表示轨迹的起点)
-            if not hasattr(self, "start_point_markers"):
+                self.base_force_ext_markers = VisualizationMarkers(marker_cfg)
+            self.base_force_ext_markers.set_visibility(True)
+
+            if not hasattr(self, "base_force_cmd_markers"):
                 marker_cfg = VisualizationMarkersCfg(
-                    prim_path="/Visuals/Command/DynamicManip/start_point",
+                    prim_path="/Visuals/Command/Force/base_cmd",
                     markers={
-                        "sphere": sim_utils.UsdFileCfg(
-                            usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Shapes/sphere.usd",
-                            scale=(0.2, 0.2, 0.2),
-                            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 0.0, 1.0)),
+                        "arrow": sim_utils.UsdFileCfg(
+                            usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/UIElements/arrow_x.usd",
+                            scale=(1.0, 1.0, 1.0),
+                            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 1.0, 0.0)),
                         ),
                     },
                 )
-                self.start_point_markers = VisualizationMarkers(marker_cfg)
-            self.start_point_markers.set_visibility(True)
+                self.base_force_cmd_markers = VisualizationMarkers(marker_cfg)
+            self.base_force_cmd_markers.set_visibility(True)
         else:
-            if hasattr(self, "current_goal_markers"):
-                self.current_goal_markers.set_visibility(False)
-            if hasattr(self, "final_target_markers"):
-                self.final_target_markers.set_visibility(False)
-            if hasattr(self, "start_point_markers"):
-                self.start_point_markers.set_visibility(False)
+            for marker_name in (
+                "ee_goal_markers",
+                "ee_actual_markers",
+                "ee_goal_offset_markers",
+                "gripper_force_ext_markers",
+                "gripper_force_cmd_markers",
+                "base_force_ext_markers",
+                "base_force_cmd_markers",
+            ):
+                if hasattr(self, marker_name):
+                    getattr(self, marker_name).set_visibility(False)
+
+    def _forces_to_quat(self, forces: torch.Tensor) -> torch.Tensor:
+        eps = 1.0e-6
+        mag = torch.linalg.norm(forces, dim=1)
+        direction = forces / (mag.unsqueeze(-1) + eps)
+        dot = torch.clamp(direction[:, 0], -1.0, 1.0)
+        angle = torch.acos(dot)
+        axis = torch.stack([torch.zeros_like(dot), -direction[:, 2], direction[:, 1]], dim=1)
+        axis_norm = torch.linalg.norm(axis, dim=1, keepdim=True)
+        default_axis = torch.zeros_like(axis)
+        default_axis[:, 2] = 1.0
+        axis = torch.where(axis_norm > eps, axis, default_axis)
+        axis = axis / torch.linalg.norm(axis, dim=1, keepdim=True)
+        quat = math_utils.quat_from_angle_axis(angle, axis)
+        identity = torch.zeros((forces.shape[0], 4), device=forces.device)
+        identity[:, 0] = 1.0
+        return torch.where(mag.unsqueeze(-1) > eps, quat, identity)
+
+    def _forces_to_scales(self, forces: torch.Tensor) -> torch.Tensor:
+        mag = torch.linalg.norm(forces, dim=1)
+        length = torch.clamp(mag * 0.02, max=0.6)
+        thickness = torch.full_like(length, 0.05)
+        return torch.stack([length, thickness, thickness], dim=1)
 
     def _debug_vis_callback(self, event):
-        """调试可视化回调 - 同时显示当前插值点、最终目标点和起点
-        
-        可视化说明：
-        - 绿色箭头：当前插值位置（机械臂当前应该到达的位置）
-        - 红色箭头：最终目标位置（轨迹终点）
-        - 蓝色箭头：起始位置（轨迹起点）
-        """
+        """调试可视化回调 - 目标/位置与力控信息"""
         # 检查环境是否仍然有效 (避免在关闭时报错)
         if not hasattr(self._env, "scene") or self._env.scene is None:
             return
 
-        # 1. 显示当前插值点 (机械臂当前应该到达的位置)
-        if hasattr(self, "current_goal_markers") and self.current_goal_markers is not None:
-            current_pos = self._pos_w  # 使用世界坐标位置进行可视化
-            current_quat = self._command[:, 3:7]
-            # 为每个环境创建 marker 索引（都使用第一个 marker 类型 "arrow"）
+        if not self.robot.is_initialized:
+            return
+
+        if self._ee_body_id is None:
+            return
+
+        base_yaw_quat = get_base_yaw_quat(self._env)
+        ee_pos_w = self.robot.data.body_pos_w[:, self._ee_body_id, :]
+        base_pos_w = self.robot.data.root_pos_w.clone()
+        base_pos_w[:, 2] += 0.2
+
+        gripper_force_ext_w = self._env.command_manager.get_command("gripper_force_ext")
+        gripper_force_cmd_l = self._env.command_manager.get_command("gripper_force_command")
+        gripper_force_cmd_w = base_yaw_to_world(gripper_force_cmd_l, base_yaw_quat)
+        gripper_impedance_cmd = self._env.command_manager.get_command("gripper_impedance_command")
+        kps = torch.clamp(gripper_impedance_cmd[:, 0], min=1.0e-6)
+        ee_goal_w = self._pos_w
+        ee_goal_offset_w = ee_goal_w + (gripper_force_ext_w + gripper_force_cmd_w) / kps.unsqueeze(-1)
+
+        base_force_ext_w = self._env.command_manager.get_command("base_force_ext")
+        base_force_cmd_l = self._env.command_manager.get_command("base_force_command")
+        base_force_cmd_w = base_yaw_to_world(base_force_cmd_l, base_yaw_quat)
+
+        if hasattr(self, "ee_goal_markers"):
+            ee_goal_quat = torch.zeros((self.num_envs, 4), device=self.device)
+            ee_goal_quat[:, 0] = 1.0
             marker_indices = torch.zeros(self.num_envs, dtype=torch.int32, device=self.device)
-            self.current_goal_markers.visualize(current_pos, current_quat, marker_indices=marker_indices)
-        
-        # 2. 显示最终目标点 (轨迹的终点)
-        if hasattr(self, "final_target_markers") and self.final_target_markers is not None:
-            # 计算最终目标的世界坐标
-            final_pos_b = self._spherical_to_cartesian(self._target_sphere)
-            final_pos_w = self._transform_to_world(final_pos_b)
-            final_quat = self._target_quat
+            self.ee_goal_markers.visualize(ee_goal_w, ee_goal_quat, marker_indices=marker_indices)
+
+        if hasattr(self, "ee_actual_markers"):
+            ee_actual_quat = torch.zeros((self.num_envs, 4), device=self.device)
+            ee_actual_quat[:, 0] = 1.0
             marker_indices = torch.zeros(self.num_envs, dtype=torch.int32, device=self.device)
-            self.final_target_markers.visualize(final_pos_w, final_quat, marker_indices=marker_indices)
-        
-        # 3. 显示起始点 (轨迹的起点)
-        if hasattr(self, "start_point_markers") and self.start_point_markers is not None:
-            # 计算起始位置的世界坐标
-            start_pos_b = self._spherical_to_cartesian(self._start_sphere)
-            start_pos_w = self._transform_to_world(start_pos_b)
-            start_quat = self._start_quat
+            self.ee_actual_markers.visualize(ee_pos_w, ee_actual_quat, marker_indices=marker_indices)
+
+        if hasattr(self, "ee_goal_offset_markers"):
+            ee_offset_quat = torch.zeros((self.num_envs, 4), device=self.device)
+            ee_offset_quat[:, 0] = 1.0
             marker_indices = torch.zeros(self.num_envs, dtype=torch.int32, device=self.device)
-            self.start_point_markers.visualize(start_pos_w, start_quat, marker_indices=marker_indices)
+            self.ee_goal_offset_markers.visualize(ee_goal_offset_w, ee_offset_quat, marker_indices=marker_indices)
+
+        if hasattr(self, "gripper_force_ext_markers"):
+            marker_indices = torch.zeros(self.num_envs, dtype=torch.int32, device=self.device)
+            gripper_ext_quat = self._forces_to_quat(gripper_force_ext_w)
+            gripper_ext_scales = self._forces_to_scales(gripper_force_ext_w)
+            self.gripper_force_ext_markers.visualize(
+                ee_pos_w, gripper_ext_quat, scales=gripper_ext_scales, marker_indices=marker_indices
+            )
+
+        if hasattr(self, "gripper_force_cmd_markers"):
+            marker_indices = torch.zeros(self.num_envs, dtype=torch.int32, device=self.device)
+            gripper_cmd_quat = self._forces_to_quat(gripper_force_cmd_w)
+            gripper_cmd_scales = self._forces_to_scales(gripper_force_cmd_w)
+            self.gripper_force_cmd_markers.visualize(
+                ee_pos_w, gripper_cmd_quat, scales=gripper_cmd_scales, marker_indices=marker_indices
+            )
+
+        if hasattr(self, "base_force_ext_markers"):
+            marker_indices = torch.zeros(self.num_envs, dtype=torch.int32, device=self.device)
+            base_ext_quat = self._forces_to_quat(base_force_ext_w)
+            base_ext_scales = self._forces_to_scales(base_force_ext_w)
+            self.base_force_ext_markers.visualize(
+                base_pos_w, base_ext_quat, scales=base_ext_scales, marker_indices=marker_indices
+            )
+
+        if hasattr(self, "base_force_cmd_markers"):
+            marker_indices = torch.zeros(self.num_envs, dtype=torch.int32, device=self.device)
+            base_cmd_quat = self._forces_to_quat(base_force_cmd_w)
+            base_cmd_scales = self._forces_to_scales(base_force_cmd_w)
+            self.base_force_cmd_markers.visualize(
+                base_pos_w, base_cmd_quat, scales=base_cmd_scales, marker_indices=marker_indices
+            )

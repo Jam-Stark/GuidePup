@@ -7,6 +7,19 @@
 
 from .dynamic_manipulation_command import DynamicManipulationCommand
 from .dynamic_manipulation_command_cfg import DynamicManipulationCommandCfg
+from .force_command import VariableForceCommand, VariableForceCommandCfg
+from .gait_phase_command import GaitPhaseCommand
+from .gait_phase_command_cfg import GaitPhaseCommandCfg
+from .virtual_impedance_command import VirtualImpedanceCommand
 from .velocity_command import ExtendedUniformVelocityCommand
 
-__all__ = ["DynamicManipulationCommand", "DynamicManipulationCommandCfg", "ExtendedUniformVelocityCommand"]
+__all__ = [
+    "DynamicManipulationCommand",
+    "DynamicManipulationCommandCfg",
+    "ExtendedUniformVelocityCommand",
+    "GaitPhaseCommand",
+    "GaitPhaseCommandCfg",
+    "VariableForceCommand",
+    "VariableForceCommandCfg",
+    "VirtualImpedanceCommand",
+]

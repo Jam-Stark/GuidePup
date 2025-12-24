@@ -11,10 +11,238 @@ from typing import TYPE_CHECKING
 from isaaclab.assets import Articulation, RigidObject
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.sensors import RayCaster
-from isaaclab.utils.math import wrap_to_pi
+from isaaclab.utils.math import quat_apply, wrap_to_pi
+
+from observation_compute import stance_mask, compute_ref_dof
+from utils import (
+    base_forces_local,
+    base_yaw_to_world,
+    get_base_yaw_quat,
+    get_body_pos_w,
+    get_command_pos_w,
+    resolve_sphere_center_w,
+    spherical_to_cartesian,
+    world_to_base_yaw,
+)
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
+
+
+def feet_contact_number(
+    env: ManagerBasedRLEnv,
+    sensor_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+    """
+        Calculates a reward based on the number of feet contacts aligning with the gait phase. 
+        Rewards or penalizes depending on whether the foot contact matches the expected gait phase.
+    """
+    # 获取接触传感器
+    contact_sensor = env.scene[sensor_cfg.name]
+    
+    # 获取足部接触力（世界坐标系）
+    # Shape: (num_envs, 4, 3) - 4只脚，每只脚3维力向量
+    contact_forces = contact_sensor.data.net_forces_w
+    
+    # 计算每只脚的接触力大小
+    # Shape: (num_envs, 4)
+    contact_force_norm = torch.norm(contact_forces, dim=-1)
+    
+    # 从传感器配置中获取接触力阈值
+    # 这确保与传感器的接触检测逻辑保持一致
+    contact_threshold = contact_sensor.cfg.force_threshold
+    
+    # 判断哪些足部在接触地面（接触力 > 阈值）
+    # Shape: (num_envs, 4) - 布尔张量，True表示接触
+    in_contact = contact_force_norm > contact_threshold
+
+    # 获取当前步态相位的站立掩码
+    stance = stance_mask(env)
+    # 计算与步态相位一致的接触数量
+    reward = torch.where(in_contact == stance, 1.0, -0.3)
+    return torch.mean(reward, dim=1)
+
+
+def feet_contact_forces_l1(
+    env: ManagerBasedRLEnv,
+    sensor_cfg: SceneEntityCfg,
+    max_contact_force: float = 150.0,
+) -> torch.Tensor:
+    """惩罚过大的足部接触力（L1）。
+
+    仅对超过阈值的部分进行惩罚，避免对正常支撑力过度惩罚。
+
+    Args:
+        env: The manager-based RL environment instance.
+        sensor_cfg: Configuration for the contact sensor (default: "contact_feet_forces").
+        max_contact_force: 允许的单脚最大接触力阈值（牛顿）。
+
+    Returns:
+        形状 (num_envs,) 的惩罚张量（正值表示惩罚程度）
+    """
+    # 获取接触传感器
+    contact_sensor = env.scene[sensor_cfg.name]
+
+    # 获取足部接触力（世界坐标系）
+    # Shape: (num_envs, 4, 3) - 4只脚，每只脚3维力向量
+    contact_forces = contact_sensor.data.net_forces_w
+
+    # 计算每只脚的接触力大小（L2 范数）
+    # Shape: (num_envs, 4)
+    contact_force_norm = torch.norm(contact_forces, dim=-1)
+
+    # 超过阈值的部分累计惩罚（L1）
+    # Shape: (num_envs,)
+    violation = contact_force_norm - max_contact_force
+    penalty = torch.sum(torch.clamp(violation, min=0.0), dim=-1)
+
+    # 返回正值惩罚（配合负权重）
+    return penalty
+
+
+def feet_pos_xy(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """惩罚足端在水平面上偏离对应髋/大腿位置的程度。
+
+    该函数计算每条腿足端与对应大腿(髋部)在 XY 平面上的距离，
+    并对四条腿取平均，得到整体偏离惩罚。
+
+    Args:
+        env: The manager-based RL environment instance.
+        asset_cfg: Asset configuration for the robot (default: "robot").
+
+    Returns:
+        形状 (num_envs,) 的惩罚张量（正值表示偏离程度）
+    """
+    robot: Articulation = env.scene[asset_cfg.name]
+
+    foot_indices, foot_names = robot.find_bodies([".*_foot"], preserve_order=True)
+    if len(foot_indices) == 0:
+        return torch.zeros(env.num_envs, device=env.device)
+
+    name_to_index = {name: idx for idx, name in enumerate(robot.body_names)}
+    thigh_indices: list[int] = []
+    for foot_name in foot_names:
+        thigh_name = foot_name.replace("_foot", "_thigh")
+        thigh_index = name_to_index.get(thigh_name)
+        if thigh_index is None:
+            thigh_indices = []
+            break
+        thigh_indices.append(thigh_index)
+
+    if not thigh_indices:
+        thigh_indices, _ = robot.find_bodies([".*_thigh$"])
+        if len(thigh_indices) == 0:
+            return torch.zeros(env.num_envs, device=env.device)
+        pair_count = min(len(foot_indices), len(thigh_indices))
+        foot_indices = foot_indices[:pair_count]
+        thigh_indices = thigh_indices[:pair_count]
+
+    foot_pos_xy = robot.data.body_pos_w[:, foot_indices, :2]
+    thigh_pos_xy = robot.data.body_pos_w[:, thigh_indices, :2]
+    diff = torch.norm(foot_pos_xy - thigh_pos_xy, dim=-1)
+    return torch.mean(diff, dim=-1)
+
+
+def tracking_lin_vel_force_world(
+    env: ManagerBasedRLEnv,
+    locomotion_command_name: str = "locomotion_commands",
+    base_force_ext_name: str = "base_force_ext",
+    base_force_cmd_name: str = "base_force_command",
+    base_impedance_command_name: str = "base_impedance_command",
+    tracking_sigma: float = 0.25,
+) -> torch.Tensor:
+
+    base_yaw_quat = get_base_yaw_quat(env)
+
+    base_force_ext_w = env.command_manager.get_command(base_force_ext_name)
+    base_force_ext_l = world_to_base_yaw(base_force_ext_w, base_yaw_quat)
+    base_force_cmd_l = env.command_manager.get_command(base_force_cmd_name)
+
+    forces_offset = base_force_ext_l + base_force_cmd_l
+
+    base_impedance_cmd = env.command_manager.get_command(base_impedance_command_name)
+    if base_impedance_cmd.shape[1] >= 2:
+        base_kd = base_impedance_cmd[:, 1]
+    else:
+        base_kd = torch.ones(env.num_envs, device=env.device)
+    base_kd = torch.clamp(base_kd, min=1e-6)
+
+    locomotion_cmd = env.command_manager.get_command(locomotion_command_name)
+    base_lin_vel_cmd = torch.zeros_like(forces_offset)
+    if locomotion_cmd.shape[1] >= 2:
+        base_lin_vel_cmd[:, :2] = locomotion_cmd[:, :2]
+    elif locomotion_cmd.shape[1] == 1:
+        base_lin_vel_cmd[:, 0] = locomotion_cmd[:, 0]
+
+    base_lin_vel_offset = forces_offset / base_kd.unsqueeze(-1) + base_lin_vel_cmd
+
+    robot: Articulation = env.scene["robot"]
+    base_lin_vel_b = robot.data.root_lin_vel_b
+    base_quat_w = robot.data.root_quat_w
+    base_lin_vel_w = quat_apply(base_quat_w, base_lin_vel_b)
+    base_lin_vel_yaw = world_to_base_yaw(base_lin_vel_w, base_yaw_quat)
+
+    lin_vel_error = torch.sum(torch.square(base_lin_vel_offset - base_lin_vel_yaw), dim=1)
+    reward = torch.exp(-lin_vel_error / tracking_sigma)
+
+    locomotion_term = env.command_manager.get_term(locomotion_command_name)
+    if hasattr(locomotion_term, "is_standing_env"):
+        reward = reward * (~locomotion_term.is_standing_env).float()
+
+    return reward
+
+
+def tracking_ee_force_world(
+    env: ManagerBasedRLEnv,
+    command_name: str = "target_position_commands",
+    gripper_cfg: SceneEntityCfg = SceneEntityCfg("robot", body_names="gripperMover"),
+    force_command_name: str = "gripper_force_ext",
+    gripper_force_command_name: str = "gripper_force_command",
+    gripper_impedance_command_name: str = "gripper_impedance_command",
+    tracking_sigma: float = 0.1,
+    ) -> torch.Tensor:
+    """Reward tracking EE position with force-offset goal in world frame."""
+    base_yaw_quat = get_base_yaw_quat(env)
+
+    gripper_force_ext_w = env.command_manager.get_command(force_command_name)
+    gripper_force_cmd_l = env.command_manager.get_command(gripper_force_command_name)
+    gripper_force_cmd_w = base_yaw_to_world(gripper_force_cmd_l, base_yaw_quat)
+    forces_offset_w = gripper_force_ext_w + gripper_force_cmd_w
+
+    command_term = env.command_manager.get_term(command_name)
+    sphere_center_w, has_sphere_center = resolve_sphere_center_w(
+        env, command_term=command_term, base_yaw_quat=base_yaw_quat
+    )
+    if hasattr(command_term, "pos_w"):
+        curr_goal_w = command_term.pos_w
+    elif has_sphere_center:
+        curr_goal_cmd = command_term.command[:, :3]
+        curr_goal_b = spherical_to_cartesian(curr_goal_cmd)
+        curr_goal_w = base_yaw_to_world(curr_goal_b, base_yaw_quat) + sphere_center_w
+    else:
+        curr_goal_w = command_term.command[:, :3]
+
+    gripper_impedance_cmd = env.command_manager.get_command(gripper_impedance_command_name)
+    kps = torch.clamp(gripper_impedance_cmd[:, 0], min=1e-6)
+    curr_goal_w_offset = curr_goal_w + forces_offset_w / kps.unsqueeze(-1)
+
+    ee_pos_w = get_body_pos_w(env, gripper_cfg)
+    ee_pos_error = torch.sum(torch.abs(ee_pos_w - curr_goal_w_offset), dim=1)
+    return torch.exp(-ee_pos_error / tracking_sigma * 2.0)
+
+
+def ref_dof_leg(env: ManagerBasedRLEnv, sigma: float = 0.1) -> torch.Tensor:
+    """Calculates the reward based on the difference between the current joint positions and the target joint positions."""
+    ref_dof = compute_ref_dof()
+    robot: Articulation = env.scene["robot"]
+    current = robot.data.joint_pos[:, env._unifp_leg_joint_ids]
+    dof_error = torch.sum(torch.square(current - ref_dof), dim=1)
+
+    return torch.exp(-dof_error / sigma)
+
 
 
 def dof_pos_limit_penalty(
@@ -103,17 +331,10 @@ def end_effector_pos_tracking(
         Reward tensor of shape (num_envs,) containing position tracking rewards.
     """
     # 1. Get target position command - 正确方式：通过command manager的_terms字典访问
-    command_term = env.command_manager._terms[command_name]
-    
-    # Check if command term has pos_w property (DynamicManipulationCommand)
-    if hasattr(command_term, "pos_w"):
-        target_pos_w = command_term.pos_w
-    else:
-        target_pos_w = command_term.command[:, :3]  # 取前3维作为位置
+    target_pos_w = get_command_pos_w(env, command_name)
 
     # 2. Get end-effector position in world frame - 正确的Isaac Lab方式
-    gripper_body_indices = env.scene[gripper_cfg.name].find_bodies(gripper_cfg.body_names)[0]
-    ee_pos_w = env.scene[gripper_cfg.name].data.body_pos_w[:, gripper_body_indices[0]]
+    ee_pos_w = get_body_pos_w(env, gripper_cfg)
 
     # 3. Calculate the distance between target and current position
     distance = torch.norm(target_pos_w - ee_pos_w, dim=1)
@@ -147,17 +368,10 @@ def end_effector_pos_tracking_l2(
         Penalty tensor of shape (num_envs,) containing negative L2 distance penalties.
     """
     # 1. Get target position command - 正确方式：通过command manager的_terms字典访问
-    command_term = env.command_manager._terms[command_name]
-    
-    # Check if command term has pos_w property (DynamicManipulationCommand)
-    if hasattr(command_term, "pos_w"):
-        target_pos_w = command_term.pos_w
-    else:
-        target_pos_w = command_term.command[:, :3]  # 取前3维作为位置
+    target_pos_w = get_command_pos_w(env, command_name)
 
     # 2. Get end-effector position in world frame - 正确的Isaac Lab方式
-    gripper_body_indices = env.scene[gripper_cfg.name].find_bodies(gripper_cfg.body_names)[0]
-    ee_pos_w = env.scene[gripper_cfg.name].data.body_pos_w[:, gripper_body_indices[0]]
+    ee_pos_w = get_body_pos_w(env, gripper_cfg)
 
     # 3. Calculate the squared L2 distance (penalty)
     distance_squared = torch.sum(torch.square(target_pos_w - ee_pos_w), dim=1)
@@ -190,7 +404,7 @@ def roll_orientation(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEn
     return torch.square(asset.data.projected_gravity_b[:, 0])
 
 
-def base_height(
+def base_height_l1(
     env: ManagerBasedRLEnv,
     target_height: float,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
@@ -401,6 +615,39 @@ def track_ang_vel_z(
     return torch.exp(-ang_vel_error / std)
 
 
+def joint_torques_l1(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
+    """Penalize joint torques applied on the articulation using l1 kernel.
+
+    NOTE: Only the joints configured in :attr:`asset_cfg.joint_ids` will have their joint torques contribute to the term.
+    """
+    # extract the used quantities (to enable type-hinting)
+    asset: Articulation = env.scene[asset_cfg.name]
+    return torch.sum(torch.abs(asset.data.applied_torque[:, asset_cfg.joint_ids]), dim=1)
+
+
+def soft_torque_limits(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    soft_limit: float | None = None,
+) -> torch.Tensor:
+    """Penalize joint torques that exceed a soft fraction of simulation joint effort limits."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    if soft_limit is None:
+        soft_limit = env.cfg.rewards.soft_torque_limit
+    if soft_limit <= 0.0:
+        return torch.zeros(asset.data.applied_torque.shape[0], device=asset.device)
+
+    applied_torque = asset.data.applied_torque[:, asset_cfg.joint_ids]
+
+    limits = asset.data.joint_effort_limits
+    if limits is None:
+        raise AttributeError("ArticulationData.joint_effort_limits is None.")
+    effort_limits = limits[:, asset_cfg.joint_ids]
+
+    excess = torch.abs(applied_torque) - effort_limits * soft_limit
+    return torch.sum(torch.clamp(excess, min=0.0), dim=1)
+
+
 def stand_still(
     env: ManagerBasedRLEnv,
     command_name: str = "locomotion_commands",
@@ -443,7 +690,7 @@ def stand_still(
         # 在 RewardsCfg 中配置
         stand_still = RewTerm(
             func=mdp.stand_still,
-            weight=1.0,  # 正权重：奖励站立时保持默认姿态
+            weight=0.5,  # 正权重：奖励站立时保持默认姿态
             params={"command_name": "locomotion_commands"}
         )
         
@@ -470,8 +717,6 @@ def stand_still(
     leg_joint_pos_diff = torch.sum(torch.abs(current_leg_joint_pos - default_leg_joint_pos), dim=1)
     
     # Compute exponential reward: exp(-deviation * scale_factor)
-    # Scale factor of 0.05 means: deviation of 20 rad → reward ≈ 0.37
-    # Shape: (num_envs,)
     stand_still_reward = torch.exp(-leg_joint_pos_diff * 0.05)
     
     # Only apply reward during standing (set walking environments to 0)
@@ -745,7 +990,7 @@ def reward_feet_height(
     env: ManagerBasedRLEnv,
     asset_cfg: SceneEntityCfg,
     command_name: str = "locomotion_commands",
-    target_height: float = 0.3,
+    target_height: float = 0.2,
     all_feet: bool = True
 ) -> torch.Tensor:
     """
@@ -785,7 +1030,7 @@ def reward_feet_height(
     
     # 计算L2范数并与目标比较
     # clamp(||feet_height|| - target, max=0) -> 返回负值或0
-    reward = torch.clamp(torch.norm(foot_heights, dim=-1) - target_height, max=0.0)
+    reward = torch.clamp(torch.max(foot_heights, dim=-1) - target_height, max=0.0)
     
     # 获取 walking mask - 只在行走时应用此奖励
     locomotion_command_term = env.command_manager._terms[command_name]
@@ -795,6 +1040,31 @@ def reward_feet_height(
     reward = reward * walking_mask.float()
     
     return reward
+
+
+def feet_height_high(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg,
+    height_threshold: float = 0.2,
+    command_name: str = "locomotion_commands",
+) -> torch.Tensor:
+    """惩罚足部抬得过高（仅在行走时生效）。
+
+    计算所有足部在世界坐标系下的最大高度，超过阈值的部分作为惩罚。
+    在站立/停止命令时，将惩罚置零。
+    """
+    robot: Articulation = env.scene[asset_cfg.name]
+    foot_indices = robot.find_bodies([".*_foot"])[0]
+    if len(foot_indices) == 0:
+        return torch.zeros(env.num_envs, device=env.device)
+
+    foot_heights = robot.data.body_pos_w[:, foot_indices, 2]
+    max_height = torch.max(foot_heights, dim=-1)[0]
+    penalty = torch.clamp(max_height - height_threshold, min=0.0)
+
+    locomotion_command_term = env.command_manager._terms[command_name]
+    walking_mask = ~locomotion_command_term.is_standing_env
+    return penalty * walking_mask.float()
 
 
 def feet_jerk(
@@ -874,7 +1144,7 @@ def feet_drag(
 ) -> torch.Tensor:
     """计算足部拖拽惩罚（足部在接触地面时移动的惩罚）。
     
-    这个函数计算足部在接触地面时的速度，用来惩罚足部在支撑相时的滑动。
+    这个函数计算足端速度与接触力的乘积，用来惩罚足部在接触时的滑动/拖拽。
     
     控制目标：
     - 在理想的行走步态中，足部在"支撑相"（接触地面）时应该与地面保持相对静止
@@ -885,17 +1155,16 @@ def feet_drag(
     Args:
         env: The manager-based RL environment instance.
         sensor_cfg: Configuration for the contact sensor (default: "contact_feet_forces").
-                   接触阈值会自动从传感器的 cfg.force_threshold 读取。
         asset_cfg: Configuration for the robot asset (default: "robot").
         
     Returns:
         形状 (num_envs,) 的惩罚张量（正值表示惩罚程度）
         
     Note:
-        - 只惩罚"支撑相"（接触地面）时的足部速度
-        - 自动使用传感器配置的 force_threshold 判断接触状态
-        - 计算足部在世界坐标系下的xy平面速度（忽略z轴）
-        - 配合负权重使用（如 weight=-0.08）
+    - 使用接触力大小对足端速度进行加权（力越大，惩罚越大）
+    - 计算足部在世界坐标系下的三维速度（包含 z 轴）
+    - 接触力接近 0 时惩罚自然接近 0，无需二值化接触掩码
+    - 配合负权重使用（如 weight=-0.08）
         
     Example:
         feet_drag = RewTerm(
@@ -917,17 +1186,9 @@ def feet_drag(
     # Shape: (num_envs, 4, 3) - 4只脚，每只脚3维力向量
     contact_forces = contact_sensor.data.net_forces_w
     
-    # 计算每只脚的接触力大小
+    # 计算每只脚的接触力大小（L2 范数）
     # Shape: (num_envs, 4)
-    contact_force_norm = torch.norm(contact_forces, dim=-1)
-    
-    # 从传感器配置中获取接触力阈值
-    # 这确保与传感器的接触检测逻辑保持一致
-    contact_threshold = contact_sensor.cfg.force_threshold
-    
-    # 判断哪些足部在接触地面（接触力 > 阈值）
-    # Shape: (num_envs, 4) - 布尔张量，True表示接触
-    in_contact = contact_force_norm > contact_threshold
+    foot_force_norm = torch.norm(contact_forces, dim=-1)
     
     # 获取足部在世界坐标系下的速度
     # 找到所有名为 "*_foot" 的body
@@ -937,22 +1198,17 @@ def feet_drag(
     # Shape: (num_envs, 4, 3) - 4只脚，每只脚3维速度向量
     foot_velocities = robot.data.body_lin_vel_w[:, foot_indices, :]
     
-    # 只计算xy平面的速度（忽略z轴垂直运动）
-    # Shape: (num_envs, 4, 2)
-    foot_velocities_xy = foot_velocities[:, :, :2]
-    
-    # 计算每只脚在xy平面的速度大小
+    # 计算足端三维速度大小（L1 范数近似）
     # Shape: (num_envs, 4)
-    foot_speed_xy = torch.norm(foot_velocities_xy, dim=-1)
+    foot_speed_xyz = torch.abs(foot_velocities).sum(dim=-1)
     
-    # 只对接触地面的足部计算惩罚（在空中的足部不惩罚）
-    # 将不接触的足部速度设为0
+    # 核心逻辑：接触力 * 速度（力越大，滑动惩罚越大）
     # Shape: (num_envs, 4)
-    contact_foot_speed = foot_speed_xy * in_contact.float()
+    dragging_vel = foot_force_norm * foot_speed_xyz
     
     # 计算所有足部的拖拽惩罚总和
     # Shape: (num_envs,)
-    drag_penalty = torch.sum(contact_foot_speed, dim=-1)
+    drag_penalty = torch.sum(dragging_vel, dim=-1)
     
     # 返回正值惩罚（配合负权重）
     return drag_penalty

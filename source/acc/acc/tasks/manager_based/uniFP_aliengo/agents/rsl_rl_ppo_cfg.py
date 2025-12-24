@@ -9,12 +9,24 @@ from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, R
 
 @configclass
 class CustomPpoActorCriticCfg(RslRlPpoActorCriticCfg):
-    latent_dim: int = 16
-    adaptation_hidden_dims: list[int] = [128, 64]
+    class_name: str = "AsymmetricActorCritic"
+    latent_dim: int = 64
+    prediction_dim: int = 12
+    history_num_frames: int = 32
+    obs_curr_dim: int = 73
+    policy_history_only: bool = True
+    history_encoder_hidden_dims: list[int] = [512, 256, 128]
+    state_estimator_hidden_dims: list[int] = [128, 64]
+    history_obs_normalization: bool = False
 
 @configclass
 class CustomPpoAlgorithmCfg(RslRlPpoAlgorithmCfg):
+    class_name: str = "PPOAdaptation"
     adaptation_coef: float = 1.0
+    adaptation_learning_rate: float = 1e-5
+    obs_pred_weights: list[float] = [0.2] * 3 + [0.2] * 3 + [1.0] * 3 + [1.0] * 3
+    obs_pred_target_obs_group: str = "pred"
+    obs_pred_target_key: str | None = None
 
 @configclass
 class PPORunnerCfg(RslRlOnPolicyRunnerCfg):
@@ -25,17 +37,16 @@ class PPORunnerCfg(RslRlOnPolicyRunnerCfg):
     experiment_name = "uniFP_aliengo_position_force"
     policy = CustomPpoActorCriticCfg(
         init_noise_std=1.0,
-        actor_obs_normalization=True,
-        critic_obs_normalization=True,
+        actor_obs_normalization=False,
+        critic_obs_normalization=False,
         actor_hidden_dims=[512, 256, 128],
         critic_hidden_dims=[512, 256, 128],
         activation="elu",
-        latent_dim=16,
-        adaptation_hidden_dims=[512, 256, 128],
     )
     obs_groups = {
         "policy": ["policy"],
-        "critic": ["policy", "privileged"],
+        "critic": ["privileged"],
+        "pred": ["pred"],
     }
     algorithm = CustomPpoAlgorithmCfg(
         value_loss_coef=1.0,
@@ -48,7 +59,7 @@ class PPORunnerCfg(RslRlOnPolicyRunnerCfg):
         
         # 学习率调度
         # Isaac Lab支持 "adaptive" 或 "fixed"
-        schedule="adaptive",
+        schedule="fixed",
         gamma=0.99,
         lam=0.95,
         desired_kl=None,

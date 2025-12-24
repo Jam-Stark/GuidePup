@@ -27,6 +27,117 @@ if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedEnv
 
 
+
+
+def reset_gait_state(env: ManagerBasedEnv, env_ids: torch.Tensor | slice | None):
+    """Reset cached gait phase buffers for the specified environments.
+
+    This is used to keep episode-local open-loop gait clocks consistent across resets. In particular, the
+    per-environment ``gait_last_update_step`` is set to the current ``common_step_counter`` so that the gait
+    phase does not advance again within the same env-step in which the reset happens.
+    """
+    # Lazy-init buffers (kept on env to share across MDP terms).
+    if not hasattr(env, "gait_indices") or not torch.is_tensor(getattr(env, "gait_indices")):
+        env.gait_indices = torch.zeros(env.num_envs, device=env.device)
+    if not hasattr(env, "gait_last_update_step") or not torch.is_tensor(getattr(env, "gait_last_update_step")):
+        env.gait_last_update_step = torch.full((env.num_envs,), -1, device=env.device, dtype=torch.long)
+    else:
+        # Ensure dtype/device/shape are as expected.
+        env.gait_last_update_step = env.gait_last_update_step.to(device=env.device, dtype=torch.long)
+        if env.gait_last_update_step.shape != (env.num_envs,):
+            fill_value = int(env.gait_last_update_step.flatten()[0].item()) if env.gait_last_update_step.numel() > 0 else -1
+            env.gait_last_update_step = torch.full((env.num_envs,), fill_value, device=env.device, dtype=torch.long)
+
+    current_step = int(getattr(env, "common_step_counter", 0))
+
+    # Resolve environment ids.
+    if env_ids is None or env_ids == slice(None):
+        env.gait_indices.zero_()
+        env.gait_last_update_step[:] = current_step
+        return
+    if not torch.is_tensor(env_ids):
+        env_ids = torch.tensor(env_ids, device=env.device, dtype=torch.long)
+    else:
+        env_ids = env_ids.to(device=env.device)
+
+    env.gait_indices[env_ids] = 0.0
+    env.gait_last_update_step[env_ids] = current_step
+
+
+def push_by_setting_velocity_standInclude(
+    env: ManagerBasedEnv,
+    env_ids: torch.Tensor | slice | None,
+    velocity_range: dict[str, tuple[float, float]],
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    command_name: str = "locomotion_commands",
+    standing_velocity_scale: float = 1.0,
+):
+    """Push asset by setting its root velocity with optional standing scaling."""
+    asset: Articulation | RigidObject = env.scene[asset_cfg.name]
+
+    if env_ids is None or env_ids == slice(None):
+        env_ids_tensor = torch.arange(env.num_envs, device=asset.device)
+        env_ids_write = None
+    else:
+        if not torch.is_tensor(env_ids):
+            env_ids_tensor = torch.tensor(env_ids, device=asset.device, dtype=torch.long)
+        else:
+            env_ids_tensor = env_ids.to(device=asset.device)
+        env_ids_write = env_ids_tensor
+
+    if env_ids_tensor.numel() == 0:
+        return
+
+    if hasattr(asset.data, "root_lin_vel_w") and hasattr(asset.data, "root_ang_vel_w"):
+        root_vel_w = torch.cat((asset.data.root_lin_vel_w, asset.data.root_ang_vel_w), dim=-1)
+    elif hasattr(asset.data, "root_vel_w"):
+        root_vel_w = asset.data.root_vel_w
+    else:
+        raise AttributeError(f"Asset '{asset_cfg.name}' does not expose root velocity buffers.")
+
+    env_root_vel = root_vel_w[env_ids_tensor].clone()
+
+    standing_mask = None
+    standing_velocity_scale = float(standing_velocity_scale)
+    if standing_velocity_scale != 1.0 and command_name:
+        try:
+            command_term = env.command_manager.get_term(command_name)
+            if hasattr(command_term, "is_standing_env"):
+                standing_mask = command_term.is_standing_env.to(device=asset.device, dtype=torch.bool)
+            else:
+                command = env.command_manager.get_command(command_name)
+                if command is not None:
+                    command = command.to(device=asset.device)
+                    if command.ndim == 2:
+                        standing_mask = (command.abs() <= 1e-6).all(dim=-1)
+        except KeyError:
+            standing_mask = None
+
+    if standing_mask is not None:
+        if env_ids_write is not None:
+            standing_mask = standing_mask[env_ids_tensor]
+        if standing_mask.numel() != env_ids_tensor.numel():
+            standing_mask = None
+
+    scale = None
+    if standing_mask is not None and standing_velocity_scale != 1.0:
+        scale = torch.ones(env_ids_tensor.numel(), device=asset.device)
+        if standing_mask.any():
+            scale[standing_mask] = standing_velocity_scale
+
+    vel_indices = {"x": 0, "y": 1, "z": 2, "roll": 3, "pitch": 4, "yaw": 5}
+    for key, idx in vel_indices.items():
+        if key not in velocity_range:
+            continue
+        low, high = velocity_range[key]
+        samples = torch.empty(env_ids_tensor.numel(), device=asset.device).uniform_(low, high)
+        if scale is not None:
+            samples *= scale
+        env_root_vel[:, idx] = samples
+
+    asset.write_root_velocity_to_sim(env_root_vel, env_ids=env_ids_write)
+
+
 class my_randomize_rigid_body_material(ManagerTermBase):
     """Randomize the physics materials on all geometries of the asset.
 

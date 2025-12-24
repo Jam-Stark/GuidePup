@@ -158,13 +158,15 @@ class CommandsCfg:
 
 命令张量维度: **7维**
 ```
-[pos_x, pos_y, pos_z, quat_w, quat_x, quat_y, quat_z]
+[radius, pitch, yaw, quat_w, quat_x, quat_y, quat_z]
 ```
 
-- `pos_x, pos_y, pos_z`: 当前插值位置（世界坐标系）
+- `radius, pitch, yaw`: 当前插值位置（球坐标），与采样空间一致
 - `quat_w, quat_x, quat_y, quat_z`: 当前插值姿态（四元数）
 
-**注意**: 这是经过插值后的**当前命令**，而非最终目标。命令每个控制步都会更新。
+**注意**:
+- 命令中的位置是球坐标，不是世界坐标。
+- 世界坐标位置会缓存在 `pos_w`（用于奖励、观测等）。
 
 ### 访问命令数据
 
@@ -175,13 +177,16 @@ def my_observation_fn(env, command_name: str):
     # 通过 command manager 访问命令
     command_term = env.command_manager._terms[command_name]
     
-    # 提取当前目标位置 (前3维)
-    current_target_pos = command_term.command[:, :3]
+    # 提取当前目标球坐标 (前3维)
+    current_target_sphere = command_term.command[:, :3]
     
     # 提取当前目标姿态 (后4维，四元数)
     current_target_quat = command_term.command[:, 3:7]  # [w, x, y, z]
+
+    # 如果需要世界坐标，使用缓存的 pos_w
+    current_target_pos_w = command_term.pos_w
     
-    return current_target_pos
+    return current_target_sphere
 ```
 
 ## 轨迹执行流程
@@ -198,7 +203,7 @@ def my_observation_fn(env, command_name: str):
    ├─> 球坐标LERP: current_sphere = start * (1-t) + target * t
    ├─> 转换为笛卡尔坐标并变换到世界坐标系
    ├─> 四元数SLERP: current_quat = slerp(start_quat, target_quat, t)
-   └─> 更新命令: [pos(3), quat(4)]
+   └─> 更新命令: [sphere(3), quat(4)]，并缓存 pos_w
 
 3. 运动阶段完成 (current_step >= move_steps)
    └─> 进入保持阶段 (t = 1，固定在目标)
