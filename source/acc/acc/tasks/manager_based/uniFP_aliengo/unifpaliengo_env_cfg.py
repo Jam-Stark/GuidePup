@@ -14,12 +14,14 @@ from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import TerminationTermCfg as DoneTerm
+from isaaclab.managers.recorder_manager import RecorderManagerBaseCfg
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 from isaaclab.utils.noise import GaussianNoiseCfg
 
 from . import mdp
+from .mdp.recorders import FrontBackLegTorquesRecorderCfg
 from isaaclab.envs.mdp.commands import UniformPoseCommand
 from isaaclab.managers import CommandTermCfg, CurriculumTermCfg
 from isaaclab.sensors import ContactSensorCfg
@@ -42,6 +44,7 @@ from .commands import (
     VariableForceCommandCfg,
     VirtualImpedanceCommand,
 )
+from .metrics import FeetContactForceMetricsCommandCfg, LegTorqueMetricsCommandCfg
 
 ##
 # Pre-defined configs
@@ -226,6 +229,8 @@ class CommandsCfg:
     target_position_commands: TargetPositionCommandCfg = TargetPositionCommandCfg()
     gripper_impedance_command: GripperImpedanceCommandCfg = GripperImpedanceCommandCfg()
     base_impedance_command: BaseImpedanceCommandCfg = BaseImpedanceCommandCfg()
+    leg_torque_metrics: LegTorqueMetricsCommandCfg = LegTorqueMetricsCommandCfg()
+    feet_contact_force_metrics: FeetContactForceMetricsCommandCfg = FeetContactForceMetricsCommandCfg()
 
     @configclass
     class GripperForceExtCfg(VariableForceCommandCfg):
@@ -428,31 +433,60 @@ class UniFPSceneCfg(InteractiveSceneCfg):
         soft_joint_pos_limit_factor=0.9,
         # 执行器配置
         actuators={
-            "legs": ImplicitActuatorCfg(
+            "hips": ImplicitActuatorCfg(
                 joint_names_expr=[
-                    # 按照实际机器人关节顺序排列
                     "FL_hip_joint", "FR_hip_joint", "RL_hip_joint", "RR_hip_joint",          # hip joints
+                ],
+                effort_limit_sim=35.0,
+                velocity_limit_sim=20.0,
+                stiffness=60.0,
+                damping=1,
+                armature=0.0,
+            ),
+            "thighs": ImplicitActuatorCfg(
+                joint_names_expr=[
                     "FL_thigh_joint", "FR_thigh_joint", "RL_thigh_joint", "RR_thigh_joint",  # thigh joints
+                ],
+                effort_limit_sim=35.0,
+                velocity_limit_sim=20.0,
+                stiffness=60.0,
+                damping=1,
+                armature=0.0,
+            ),
+            "calfs": ImplicitActuatorCfg(
+                joint_names_expr=[
                     "FL_calf_joint", "FR_calf_joint", "RL_calf_joint", "RR_calf_joint",      # calf joints
                 ],
                 # Aliengo URDF: Calf max 44.4 Nm, others 35.3 Nm
                 effort_limit_sim=45.0,
                 # Aliengo URDF: Hip/Thigh max 20 rad/s, Calf 15.9 rad/s
-                velocity_limit_sim=20.0,
-                stiffness=100.0,
-                damping=2.0,
+                velocity_limit_sim=15.0,
+                stiffness=60.0,
+                damping=1,
                 armature=0.0,
             ),
             "arm": ImplicitActuatorCfg(
                 joint_names_expr=[
-                    "arm_joint1", "arm_joint2", "arm_joint3",
+                    "arm_joint1", "arm_joint3",
                     "arm_joint4", "arm_joint5",
+                ],
+                # Z1 URDF: Joint2 max 60 Nm, others 30 Nm
+                effort_limit_sim=30.0,
+                # Z1 URDF: All joints max 3.1415 rad/s
+                velocity_limit_sim=3.15,
+                stiffness=40.0,
+                damping=1,
+                armature=0.0,
+            ),
+            "arm_shoulder": ImplicitActuatorCfg(
+                joint_names_expr=[
+                    "arm_joint2",
                 ],
                 # Z1 URDF: Joint2 max 60 Nm, others 30 Nm
                 effort_limit_sim=60.0,
                 # Z1 URDF: All joints max 3.1415 rad/s
                 velocity_limit_sim=3.15,
-                stiffness=64.0,
+                stiffness=45.0,
                 damping=1.5,
                 armature=0.0,
             ),
@@ -983,6 +1017,13 @@ class CurriculumCfg:
             },
         },
     )
+
+
+@configclass
+class RecordersCfg(RecorderManagerBaseCfg):
+    """Recorder terms for logging environment data."""
+
+    leg_torques = FrontBackLegTorquesRecorderCfg()
             
 
 @configclass
@@ -1282,12 +1323,12 @@ class RewardsCfg:
         params={"threshold": 1.0, "sensor_cfg": SceneEntityCfg("penalize_contacts")},
     )
     action_rate_legs = RewTerm(
-        func=mdp.joint_action_rate_l2,
+        func=mdp.joint_processed_action_rate_l2,
         weight=-0.02,
         params={"action_term_name": "leg_actions"}
     )
     action_rate_arm = RewTerm(
-        func=mdp.joint_action_rate_l2,
+        func=mdp.joint_processed_action_rate_l2,
         weight=-0.045,
         params={"action_term_name": "arm_actions"}
     )
@@ -1349,7 +1390,7 @@ class RewardsCfg:
     feet_height_high = RewTerm(
         func=mdp.feet_height_high,
         weight=-15.0,
-        params={"asset_cfg": SceneEntityCfg("robot"), "height_threshold": 0.25}
+        params={"asset_cfg": SceneEntityCfg("robot"), "height_threshold": 0.3}
     )
     tracking_ee_force_world = RewTerm(
         func=mdp.tracking_ee_force_world,
@@ -1404,7 +1445,7 @@ class TerminationsCfg:
 @configclass
 class UniFPAliengoEnvCfg(ManagerBasedRLEnvCfg):
     # Scene settings
-    scene: UniFPSceneCfg = UniFPSceneCfg(num_envs=1024, env_spacing=4.0)
+    scene: UniFPSceneCfg = UniFPSceneCfg(num_envs=2048, env_spacing=4.0)
     # Basic settings
     observations: ObservationsCfg = ObservationsCfg()
     actions: ActionsCfg = ActionsCfg()
@@ -1415,6 +1456,8 @@ class UniFPAliengoEnvCfg(ManagerBasedRLEnvCfg):
     terminations: TerminationsCfg = TerminationsCfg()
     # 课程学习设置
     curriculum: CurriculumCfg = CurriculumCfg()
+    # Recorder settings
+    # recorders: RecordersCfg = RecordersCfg()
 
     # Post initialization
     def __post_init__(self) -> None:

@@ -43,6 +43,30 @@ def joint_action_rate_l2(env: ManagerBasedRLEnv, action_term_name: str) -> torch
     return torch.sum(torch.square(current_action - prev_action), dim=1)
 
 
+def joint_processed_action_rate_l2(env: ManagerBasedRLEnv, action_term_name: str) -> torch.Tensor:
+    term = env.action_manager.get_term(action_term_name)
+    current_action = term.processed_actions
+
+    if not hasattr(env, "_prev_processed_actions"):
+        env._prev_processed_actions = {}
+    prev_action = env._prev_processed_actions.get(action_term_name)
+    if prev_action is None:
+        env._prev_processed_actions[action_term_name] = current_action.clone()
+        return torch.zeros(
+            current_action.shape[0],
+            device=current_action.device,
+            dtype=current_action.dtype,
+        )
+
+    action_delta = current_action - prev_action
+    if hasattr(env, "episode_length_buf"):
+        reset_env_ids = (env.episode_length_buf == 1).nonzero(as_tuple=False).flatten()
+        if len(reset_env_ids) > 0:
+            action_delta[reset_env_ids] = 0.0
+
+    env._prev_processed_actions[action_term_name] = current_action.clone()
+    return torch.sum(torch.square(action_delta), dim=1)
+
 
 def feet_contact_number(
     env: ManagerBasedRLEnv,

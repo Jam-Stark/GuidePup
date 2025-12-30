@@ -58,12 +58,11 @@ class PPORunnerCfg(RslRlOnPolicyRunnerCfg):
         num_mini_batches=4,
         learning_rate=1e-3,
         
-        # 学习率调度
         # Isaac Lab支持 "adaptive" 或 "fixed"
-        schedule="fixed",
+        schedule="adaptive",
         gamma=0.99,
         lam=0.95,
-        desired_kl=None,
+        desired_kl=0.01,
         max_grad_norm=1.0,
         adaptation_coef=1.0,
     )

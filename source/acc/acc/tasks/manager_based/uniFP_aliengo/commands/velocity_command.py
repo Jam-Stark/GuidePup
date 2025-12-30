@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 
 # 导入父类和配置类
 from isaaclab.envs.mdp.commands import UniformVelocityCommand, UniformVelocityCommandCfg
+from ..mdp.utils import get_base_yaw_quat, world_to_base_yaw
 
 
 @configclass
@@ -197,9 +198,27 @@ class ExtendedUniformVelocityCommand(UniformVelocityCommand):
         base_pos_w[:, 2] += 0.5  # 在机器人上方0.5米显示箭头
 
         # -- resolve the scales and quaternions
-        # 计算箭头的方向（基于速度命令）
+        # 计算箭头的方向（基于速度命令 + 力偏置）
         # 只考虑 xy 平面的速度
         vel_command = self.command[:, :2]  # (num_envs, 2) - [vx, vy]
+        if hasattr(self, "_env") and hasattr(self._env, "command_manager"):
+            base_yaw_quat = get_base_yaw_quat(self._env)
+            base_force_ext_w = self._env.command_manager.get_command("base_force_ext")
+            base_force_ext_l = world_to_base_yaw(base_force_ext_w, base_yaw_quat)
+            base_force_cmd_l = self._env.command_manager.get_command("base_force_command")
+            forces_offset = base_force_ext_l + base_force_cmd_l
+
+            base_impedance_cmd = self._env.command_manager.get_command("base_impedance_command")
+            if base_impedance_cmd.shape[1] >= 2:
+                base_kd = base_impedance_cmd[:, 1]
+            else:
+                base_kd = torch.ones(self.num_envs, device=self.device)
+            base_kd = torch.clamp(base_kd, min=1e-6)
+
+            base_lin_vel_cmd = torch.zeros((self.num_envs, 3), device=self.device)
+            base_lin_vel_cmd[:, :2] = self.command[:, :2]
+            base_lin_vel_offset = forces_offset / base_kd.unsqueeze(-1) + base_lin_vel_cmd
+            vel_command = base_lin_vel_offset[:, :2]
         
         # 计算偏航角（速度方向）
         yaw = torch.atan2(vel_command[:, 1], vel_command[:, 0])  # (num_envs,)
