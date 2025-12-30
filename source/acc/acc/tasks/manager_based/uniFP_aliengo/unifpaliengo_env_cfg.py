@@ -156,7 +156,7 @@ class CommandsCfg:
         @configclass
         class Ranges:
             """球坐标采样范围"""
-            radius: Tuple[float, float] = (0.4, 0.7)  # 径向距离 l (米)
+            radius: Tuple[float, float] = (0.4, 0.9)  # 径向距离 l (米)
             pitch_angle: Tuple[float, float] = (-1.0, 1.0)  # 俯仰角 p (弧度)
             yaw_angle: Tuple[float, float] = (-1.2, 1.2)  # 方位角 y (弧度)
             
@@ -364,7 +364,7 @@ class UniFPSceneCfg(InteractiveSceneCfg):
             merge_fixed_joints=False,  # 保留足部等固定关节链接
             self_collision=True,
             
-            # 刚体物理属性配置 - 按照VBC asset配置
+            # 刚体物理属性配置
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
                 rigid_body_enabled=True,
                 max_linear_velocity=1000.0,      # VBC: max_linear_velocity
@@ -440,7 +440,7 @@ class UniFPSceneCfg(InteractiveSceneCfg):
                 effort_limit_sim=35.0,
                 velocity_limit_sim=20.0,
                 stiffness=60.0,
-                damping=1,
+                damping=2.0,
                 armature=0.0,
             ),
             "thighs": ImplicitActuatorCfg(
@@ -450,7 +450,7 @@ class UniFPSceneCfg(InteractiveSceneCfg):
                 effort_limit_sim=35.0,
                 velocity_limit_sim=20.0,
                 stiffness=60.0,
-                damping=1,
+                damping=2.0,
                 armature=0.0,
             ),
             "calfs": ImplicitActuatorCfg(
@@ -462,7 +462,7 @@ class UniFPSceneCfg(InteractiveSceneCfg):
                 # Aliengo URDF: Hip/Thigh max 20 rad/s, Calf 15.9 rad/s
                 velocity_limit_sim=15.0,
                 stiffness=60.0,
-                damping=1,
+                damping=3.0,
                 armature=0.0,
             ),
             "arm": ImplicitActuatorCfg(
@@ -1380,7 +1380,7 @@ class RewardsCfg:
     base_height = RewTerm(
         func=mdp.base_height_l2,
         weight=-2.0,
-        params={"target_height": 0.45}  # 设置目标高度
+        params={"target_height": 0.40}
     )
     feet_pos_xy = RewTerm(
         func=mdp.feet_pos_xy,
@@ -1445,7 +1445,7 @@ class TerminationsCfg:
 @configclass
 class UniFPAliengoEnvCfg(ManagerBasedRLEnvCfg):
     # Scene settings
-    scene: UniFPSceneCfg = UniFPSceneCfg(num_envs=2048, env_spacing=4.0)
+    scene: UniFPSceneCfg = UniFPSceneCfg(num_envs=3072, env_spacing=4.0)
     # Basic settings
     observations: ObservationsCfg = ObservationsCfg()
     actions: ActionsCfg = ActionsCfg()

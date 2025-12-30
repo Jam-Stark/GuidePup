@@ -572,7 +572,7 @@ class DynamicManipulationCommand(CommandTerm):
                     markers={
                         "sphere": sim_utils.UsdFileCfg(
                             usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Shapes/sphere.usd",
-                            scale=(0.06, 0.06, 0.06),
+                            scale=(0.1, 0.1, 0.1),
                             visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(1.0, 1.0, 0.0)),
                         ),
                     },
@@ -586,7 +586,7 @@ class DynamicManipulationCommand(CommandTerm):
                     markers={
                         "sphere": sim_utils.UsdFileCfg(
                             usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Shapes/sphere.usd",
-                            scale=(0.06, 0.06, 0.06),
+                            scale=(0.1, 0.1, 0.1),
                             visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.05, 0.1, 0.6)),
                         ),
                     },
@@ -600,7 +600,7 @@ class DynamicManipulationCommand(CommandTerm):
                     markers={
                         "sphere": sim_utils.UsdFileCfg(
                             usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Shapes/sphere.usd",
-                            scale=(0.06, 0.06, 0.06),
+                            scale=(0.1, 0.1, 0.1),
                             visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(1.0, 0.0, 1.0)),
                         ),
                     },

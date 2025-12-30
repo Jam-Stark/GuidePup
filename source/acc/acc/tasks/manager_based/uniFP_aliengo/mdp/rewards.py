@@ -351,7 +351,7 @@ def feet_air_time(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
     # 计算腾空时间奖励
     first_contact_filter = contact_sensor.compute_first_contact(dt)
     air_time = contact_sensor.data.current_air_time
-    air_time_reward = torch.sum((air_time - 0.5) * first_contact_filter.float(), dim=1)
+    air_time_reward = torch.sum((air_time - 0.25) * first_contact_filter.float(), dim=1)
     
     # 只在 walking 状态下给奖励
     walking_mask = ~locomotion_command_term.is_standing_env

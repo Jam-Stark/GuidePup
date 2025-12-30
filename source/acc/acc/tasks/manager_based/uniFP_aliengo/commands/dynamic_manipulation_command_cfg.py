@@ -103,4 +103,3 @@ class DynamicManipulationCommandCfg(CommandTermCfg):
     goal_pose_visualizer_cfg: VisualizationMarkersCfg = FRAME_MARKER_CFG.replace(
         prim_path="/Visuals/Command/goal_position"
     )
-    """目标位姿的可视化配置"""
