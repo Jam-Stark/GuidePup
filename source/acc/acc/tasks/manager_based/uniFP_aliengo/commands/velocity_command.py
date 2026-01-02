@@ -101,7 +101,7 @@ class ExtendedUniformVelocityCommand(UniformVelocityCommand):
             return
 
         # 转换为张量
-        env_ids_tensor = torch.tensor(env_ids, dtype=torch.long, device=self.device)
+        env_ids_tensor = torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
 
         # 1. 采样线速度和角速度（使用父类的范围配置）
         # -- linear velocity - x direction

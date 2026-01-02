@@ -940,10 +940,10 @@ def modify_lin_vel_x_range(env, env_ids, old_value, new_value, num_steps):
     return mdp.modify_term_cfg.NO_CHANGE
 
 
-def modify_force_range(env, env_ids, old_value, zero_range, full_range):
+def modify_force_range(env, env_ids, old_value, zero_range, full_range, resume_steps=0):
     """Clamp force command range to zero until the curriculum threshold."""
     start_steps = 8000 * 24
-    if env.common_step_counter > start_steps:
+    if env.common_step_counter + resume_steps > start_steps:
         return full_range
     return zero_range
 
@@ -978,6 +978,7 @@ class CurriculumCfg:
             "modify_params": {
                 "zero_range": (0.0, 0.0),
                 "full_range": (-50.0, 50.0),
+                "resume_steps": 20000 * 24,
             },
         },
     )
@@ -990,6 +991,7 @@ class CurriculumCfg:
             "modify_params": {
                 "zero_range": (0.0, 0.0),
                 "full_range": (-30.0, 30.0),
+                "resume_steps": 20000 * 24,
             },
         },
     )
@@ -1002,6 +1004,7 @@ class CurriculumCfg:
             "modify_params": {
                 "zero_range": (0.0, 0.0),
                 "full_range": (-50.0, 50.0),
+                "resume_steps": 20000 * 24,
             },
         },
     )
@@ -1014,6 +1017,7 @@ class CurriculumCfg:
             "modify_params": {
                 "zero_range": (0.0, 0.0),
                 "full_range": (-30.0, 30.0),
+                "resume_steps": 20000 * 24,
             },
         },
     )
@@ -1278,7 +1282,7 @@ class RewardsCfg:
         params={
             "asset_cfg": SceneEntityCfg("robot"),
             "command_name": "locomotion_commands",
-            "target_height": 0.1,
+            "target_height": 0.08,
             "all_feet": False,
         }
     )
@@ -1390,7 +1394,7 @@ class RewardsCfg:
     feet_height_high = RewTerm(
         func=mdp.feet_height_high,
         weight=-15.0,
-        params={"asset_cfg": SceneEntityCfg("robot"), "height_threshold": 0.3}
+        params={"asset_cfg": SceneEntityCfg("robot"), "height_threshold": 0.15}
     )
     tracking_ee_force_world = RewTerm(
         func=mdp.tracking_ee_force_world,
@@ -1445,7 +1449,7 @@ class TerminationsCfg:
 @configclass
 class UniFPAliengoEnvCfg(ManagerBasedRLEnvCfg):
     # Scene settings
-    scene: UniFPSceneCfg = UniFPSceneCfg(num_envs=3072, env_spacing=4.0)
+    scene: UniFPSceneCfg = UniFPSceneCfg(num_envs=4096, env_spacing=4.0)
     # Basic settings
     observations: ObservationsCfg = ObservationsCfg()
     actions: ActionsCfg = ActionsCfg()

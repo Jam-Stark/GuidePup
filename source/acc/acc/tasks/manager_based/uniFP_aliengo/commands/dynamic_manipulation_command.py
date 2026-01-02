@@ -125,7 +125,7 @@ class DynamicManipulationCommand(CommandTerm):
             return
         
         n = len(env_ids)
-        env_ids_tensor = torch.tensor(env_ids, dtype=torch.long, device=self.device).detach().clone()
+        env_ids_tensor = torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
         
         # 1. 判断是否为初始化 (首次采样)
         is_initial = self._total_steps[env_ids_tensor] == 0
