@@ -440,7 +440,7 @@ class UniFPSceneCfg(InteractiveSceneCfg):
                 effort_limit_sim=35.0,
                 velocity_limit_sim=20.0,
                 stiffness=60.0,
-                damping=2.0,
+                damping=3.0,
                 armature=0.0,
             ),
             "thighs": ImplicitActuatorCfg(
@@ -450,7 +450,7 @@ class UniFPSceneCfg(InteractiveSceneCfg):
                 effort_limit_sim=35.0,
                 velocity_limit_sim=20.0,
                 stiffness=60.0,
-                damping=2.0,
+                damping=3.0,
                 armature=0.0,
             ),
             "calfs": ImplicitActuatorCfg(
@@ -462,7 +462,7 @@ class UniFPSceneCfg(InteractiveSceneCfg):
                 # Aliengo URDF: Hip/Thigh max 20 rad/s, Calf 15.9 rad/s
                 velocity_limit_sim=15.0,
                 stiffness=60.0,
-                damping=3.0,
+                damping=4.0,
                 armature=0.0,
             ),
             "arm": ImplicitActuatorCfg(
@@ -474,8 +474,8 @@ class UniFPSceneCfg(InteractiveSceneCfg):
                 effort_limit_sim=30.0,
                 # Z1 URDF: All joints max 3.1415 rad/s
                 velocity_limit_sim=3.15,
-                stiffness=40.0,
-                damping=1,
+                stiffness=60.0,
+                damping=2,
                 armature=0.0,
             ),
             "arm_shoulder": ImplicitActuatorCfg(
@@ -486,8 +486,8 @@ class UniFPSceneCfg(InteractiveSceneCfg):
                 effort_limit_sim=60.0,
                 # Z1 URDF: All joints max 3.1415 rad/s
                 velocity_limit_sim=3.15,
-                stiffness=45.0,
-                damping=1.5,
+                stiffness=80.0,
+                damping=3,
                 armature=0.0,
             ),
         },
