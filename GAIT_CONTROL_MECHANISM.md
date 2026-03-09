@@ -49,12 +49,12 @@
 本项目将“步态相位”的状态统一交给 Isaac Lab Manager-Based 的 **CommandManager / CommandTerm** 管理：
 
 - **相位命令**: `gait_phase`（CommandTerm，输出相位 φ∈[0,1)）
-  - **实现**: `source/acc/acc/tasks/manager_based/uniFP_aliengo/commands/gait_phase_command.py`
-  - **配置**: `source/acc/acc/tasks/manager_based/uniFP_aliengo/unifpaliengo_env_cfg.py` 的 `CommandsCfg.gait_phase`
+  - **实现**: `source/LMP/acc/tasks/manager_based/uniFP_aliengo/commands/gait_phase_command.py`
+  - **配置**: `source/LMP/acc/tasks/manager_based/uniFP_aliengo/unifpaliengo_env_cfg.py` 的 `CommandsCfg.gait_phase`
 - **观测函数**（由 `gait_phase` 派生，不再自行维护相位状态）:
   - `gait_clock_signal()`：2 维 `[sin(2πφ), cos(2πφ)]`
   - `gait_clock_signal_per_foot()`：4 维（每只脚一个正弦信号）
-  - **实现**: `source/acc/acc/tasks/manager_based/uniFP_aliengo/mdp/observation_compute.py`
+  - **实现**: `source/LMP/acc/tasks/manager_based/uniFP_aliengo/mdp/observation_compute.py`
 
 ### 2.2 工作原理
 
@@ -160,7 +160,7 @@ gait_clock_per_foot = ObsTerm(
 ### 3.2 奖励函数 1: 接触力跟踪 (Contact Force Tracking)
 
 **函数名称**: `reward_tracking_contacts_shaped_force()`  
-**文件路径**: `source/acc/acc/tasks/manager_based/vbc/mdp/rewards.py`
+**文件路径**: `source/LMP/acc/tasks/manager_based/vbc/mdp/rewards.py`
 
 #### 3.2.1 目标
 
@@ -229,7 +229,7 @@ tracking_contacts_force = RewTerm(
 ### 3.3 奖励函数 2: 接触速度跟踪 (Contact Velocity Tracking)
 
 **函数名称**: `reward_tracking_contacts_shaped_vel()`  
-**文件路径**: `source/acc/acc/tasks/manager_based/vbc/mdp/rewards.py`
+**文件路径**: `source/LMP/acc/tasks/manager_based/vbc/mdp/rewards.py`
 
 #### 3.3.1 目标
 
@@ -292,7 +292,7 @@ tracking_contacts_vel = RewTerm(
 ### 3.4 奖励函数 3: 摆动足高度 (Swing Foot Height)
 
 **函数名称**: `reward_feet_height()`  
-**文件路径**: `source/acc/acc/tasks/manager_based/vbc/mdp/rewards.py`
+**文件路径**: `source/LMP/acc/tasks/manager_based/vbc/mdp/rewards.py`
 
 #### 3.4.1 目标
 
@@ -485,7 +485,7 @@ episode_length                   # 站立/行走都能维持长 episode
 ### 7.1 核心文件
 
 ```
-source/acc/acc/tasks/manager_based/vbc/
+source/LMP/acc/tasks/manager_based/vbc/
 ├── observation_compute.py          # 步态时钟观测函数
 │   └── gait_clock_signal()        # 4维步态时钟信号
 │

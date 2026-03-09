@@ -9,10 +9,10 @@ Usage:
 
 import argparse
 import h5py
-import torch
-import sys
-import os
 from isaaclab.app import AppLauncher
+import torch
+
+from _extension_source import append_acc_source_dir
 
 # Argument parsing
 parser = argparse.ArgumentParser(description="Record expert data from VBC policy for ACC initialization.")
@@ -32,13 +32,7 @@ app_launcher = AppLauncher(args)
 simulation_app = app_launcher.app
 
 # Import Isaac Lab modules (must be after launching app)
-# Add the 'acc' package to sys.path so we can import it
-# This assumes the script is located in /workspace/acc/scripts/
-# and the package is in /workspace/acc/source/acc/
-script_dir = os.path.dirname(os.path.abspath(__file__))
-acc_source_dir = os.path.join(script_dir, "../source/acc")
-sys.path.append(acc_source_dir)
-
+append_acc_source_dir()
 # Import the custom package to register the tasks
 import acc
 

@@ -1,0 +1,6 @@
+version: 1
+display_name: RL Command Manager
+short_description: Manage RL train/play command batches with base-aware diff notes.
+default_prompt: >-
+  Add or update a batch in experiments/COMMAND_BATCHES.md from my train command,
+  auto-generate the matching play command, and produce analysis vs previous and active base.

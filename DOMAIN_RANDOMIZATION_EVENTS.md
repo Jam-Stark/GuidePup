@@ -99,7 +99,7 @@
 ## 配置文件位置
 
 所有事件配置位于：
-- `source/acc/acc/tasks/manager_based/vbc/vbc_env_cfg.py` 中的 `EventCfg` 类
+- `source/LMP/acc/tasks/manager_based/vbc/vbc_env_cfg.py` 中的 `EventCfg` 类
 
 所有事件函数均使用Isaac Lab官方API，位于：
 - `isaaclab.envs.mdp.events` 模块

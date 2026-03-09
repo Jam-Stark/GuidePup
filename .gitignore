@@ -43,6 +43,9 @@ docker/.container.cfg
 docker/artifacts/
 *.tmp
 
+# Local assets
+/resources/
+
 # Doc Outputs
 **/docs/_build/*
 **/generated/*

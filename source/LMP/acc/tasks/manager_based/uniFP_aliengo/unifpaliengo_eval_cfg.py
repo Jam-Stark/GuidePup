@@ -1,0 +1,130 @@
+from __future__ import annotations
+
+from isaaclab.managers import EventTermCfg as EventTerm
+from isaaclab.managers import SceneEntityCfg
+from isaaclab.utils import configclass
+
+from . import mdp
+from .commands import ScriptedForceCommandCfg
+from .unifpaliengo_env_cfg import CommandsCfg as TrainCommandsCfg
+from .unifpaliengo_env_cfg import UniFPAliengoEnvCfg
+
+
+RESET_JOINT_NAMES = [
+    "FL_hip_joint",
+    "FR_hip_joint",
+    "RL_hip_joint",
+    "RR_hip_joint",
+    "FL_thigh_joint",
+    "FR_thigh_joint",
+    "RL_thigh_joint",
+    "RR_thigh_joint",
+    "FL_calf_joint",
+    "FR_calf_joint",
+    "RL_calf_joint",
+    "RR_calf_joint",
+    "arm_joint1",
+    "arm_joint2",
+    "arm_joint3",
+    "arm_joint4",
+    "arm_joint5",
+]
+
+
+@configclass
+class ReversePushEvalCommandsCfg(TrainCommandsCfg):
+    """Command configuration for deterministic reverse-push evaluation."""
+
+    @configclass
+    class BaseForceExtCfg(ScriptedForceCommandCfg):
+        command_name: str = "base_force_ext"
+        is_global: bool = True
+
+    base_force_ext: BaseForceExtCfg = BaseForceExtCfg()
+
+
+@configclass
+class ReversePushEvalEventCfg:
+    """Minimal deterministic events for evaluation."""
+
+    reset_gait_state = EventTerm(
+        func=mdp.reset_gait_state,
+        mode="reset",
+    )
+
+    reset_robot_base = EventTerm(
+        func=mdp.reset_root_state_uniform,
+        mode="reset",
+        params={
+            "pose_range": {"x": (0.0, 0.0), "y": (0.0, 0.0), "z": (0.0, 0.0)},
+            "velocity_range": {
+                "x": (0.0, 0.0),
+                "y": (0.0, 0.0),
+                "z": (0.0, 0.0),
+                "roll": (0.0, 0.0),
+                "pitch": (0.0, 0.0),
+                "yaw": (0.0, 0.0),
+            },
+            "asset_cfg": SceneEntityCfg("robot"),
+        },
+    )
+
+    reset_joints_by_offset = EventTerm(
+        func=mdp.reset_joints_by_offset,
+        mode="reset",
+        params={
+            "position_range": (0.0, 0.0),
+            "velocity_range": (0.0, 0.0),
+            "asset_cfg": SceneEntityCfg("robot", joint_names=RESET_JOINT_NAMES),
+        },
+    )
+
+
+@configclass
+class ReversePushEvalCurriculumCfg:
+    """Disable curriculum updates for deterministic evaluation."""
+
+
+@configclass
+class UniFPAliengoReversePushEvalCfg(UniFPAliengoEnvCfg):
+    """Test-only cfg for scripted reverse-push locomotion evaluation."""
+
+    commands: ReversePushEvalCommandsCfg = ReversePushEvalCommandsCfg()
+    events: ReversePushEvalEventCfg = ReversePushEvalEventCfg()
+    curriculum: ReversePushEvalCurriculumCfg = ReversePushEvalCurriculumCfg()
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+
+        self.scene.robot.actuators["hips"].stiffness = 180.0
+        self.scene.robot.actuators["hips"].damping = 4.0
+        self.scene.robot.actuators["thighs"].stiffness = 180.0
+        self.scene.robot.actuators["thighs"].damping = 4.0
+        self.scene.robot.actuators["calfs"].stiffness = 300.0
+        self.scene.robot.actuators["calfs"].damping = 6.5
+        self.scene.robot.actuators["arm"].stiffness = 64.0
+        self.scene.robot.actuators["arm"].damping = 2.0
+        self.scene.robot.actuators["arm_shoulder"].stiffness = 128.0
+        self.scene.robot.actuators["arm_shoulder"].damping = 3.0
+
+        self.actions.arm_actions.scale = 0.0
+
+        self.commands.gait_phase.gait_frequency = 3.0
+        self.commands.target_position_commands.ranges.radius = (0.60, 0.60)
+        self.commands.target_position_commands.ranges.pitch_angle = (0.0, 0.0)
+        self.commands.target_position_commands.ranges.yaw_angle = (0.0, 0.0)
+
+        self.commands.gripper_force_ext.force_range = (0.0, 0.0)
+        self.commands.gripper_force_command.force_range = (0.0, 0.0)
+        self.commands.base_force_command.force_range = (0.0, 0.0)
+
+        self.commands.locomotion_commands.resampling_time_range = (1.0e9, 1.0e9)
+        self.commands.locomotion_commands.rel_standing_envs = 0.0
+        self.commands.locomotion_commands.ranges.lin_vel_x = (0.4, 0.4)
+        self.commands.locomotion_commands.ranges.lin_vel_y = (0.0, 0.0)
+        self.commands.locomotion_commands.ranges.ang_vel_z = (0.0, 0.0)
+
+        self.rewards.feet_air_time.params["target_air_time"] = 0.1667
+        self.rewards.tracking_ee_force_world.weight = 0.0
+
+        self.observations.policy.enable_corruption = False

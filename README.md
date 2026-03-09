@@ -1,16 +1,16 @@
-# Template for Isaac Lab Projects
+# LMP for Isaac Lab
 
 ## Overview
 
-This project/repository serves as a template for building projects or extensions based on Isaac Lab.
+This project/repository provides the LMP extension and task suite built on Isaac Lab.
 It allows you to develop in an isolated environment, outside of the core Isaac Lab repository.
 
 **Key Features:**
 
 - `Isolation` Work outside the core Isaac Lab repository, ensuring that your development efforts remain self-contained.
-- `Flexibility` This template is set up to allow your code to be run as an extension in Omniverse.
+- `Flexibility` The project is set up to allow your code to be run as an extension in Omniverse.
 
-**Keywords:** extension, template, isaaclab
+**Keywords:** lmp, extension, isaaclab
 
 ## Installation
 
@@ -23,7 +23,8 @@ It allows you to develop in an isolated environment, outside of the core Isaac L
 
     ```bash
     # use 'PATH_TO_isaaclab.sh|bat -p' instead of 'python' if Isaac Lab is not installed in Python venv or conda
-    python -m pip install -e source/acc
+    python -m pip install -e source/LMP
+    ```
 
 - Verify that the extension is correctly installed by:
 
@@ -74,7 +75,7 @@ This helps in indexing all the python modules for intelligent suggestions while 
 
 ### Setup as Omniverse Extension (Optional)
 
-We provide an example UI extension that will load upon enabling your extension defined in `source/acc/acc/ui_extension_example.py`.
+We provide an example UI extension that will load upon enabling your extension defined in `source/LMP/acc/ui_extension_example.py`.
 
 To enable your extension, follow these steps:
 
@@ -114,7 +115,7 @@ In this case, add the path to your extension in `.vscode/settings.json` under th
 ```json
 {
     "python.analysis.extraPaths": [
-        "<path-to-ext-repo>/source/acc"
+        "<path-to-ext-repo>/source/LMP"
     ]
 }
 ```

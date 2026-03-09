@@ -1,12 +1,11 @@
 
 import argparse
-import sys
 import os
+import sys
 
-# Add acc to path
-script_dir = os.path.dirname(os.path.abspath(__file__))
-acc_source_dir = os.path.join(script_dir, "../source/acc")
-sys.path.append(acc_source_dir)
+from _extension_source import append_acc_source_dir
+
+append_acc_source_dir()
 
 from isaaclab.app import AppLauncher
 

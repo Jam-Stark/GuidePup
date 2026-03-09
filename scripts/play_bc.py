@@ -3,10 +3,10 @@ Script to play the trained ACC BC policy.
 """
 
 import argparse
-import torch
-import sys
-import os
 from isaaclab.app import AppLauncher
+import torch
+
+from _extension_source import append_acc_source_dir
 
 # Argument parsing
 parser = argparse.ArgumentParser(description="Play trained ACC BC policy.")
@@ -23,10 +23,7 @@ app_launcher = AppLauncher(args)
 simulation_app = app_launcher.app
 
 # Import Isaac Lab modules
-script_dir = os.path.dirname(os.path.abspath(__file__))
-acc_source_dir = os.path.join(script_dir, "../source/acc")
-sys.path.append(acc_source_dir)
-
+append_acc_source_dir()
 import acc  # noqa: F401
 from isaaclab.envs import ManagerBasedRLEnv
 from isaaclab_tasks.utils import parse_env_cfg
