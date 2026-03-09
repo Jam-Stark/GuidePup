@@ -5,12 +5,13 @@ from __future__ import annotations
 import argparse
 import csv
 from datetime import datetime
+import os
 from pathlib import Path
 import sys
 
 import torch
 
-SCRIPTS_DIR = Path(__file__).resolve().parent.parent
+SCRIPTS_DIR = Path(__file__).resolve().parents[2]
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.append(str(SCRIPTS_DIR))
 
@@ -21,7 +22,14 @@ from isaaclab.app import AppLauncher
 parser = argparse.ArgumentParser(description="Evaluate a UniFP Aliengo policy with a scripted reverse push.")
 policy_group = parser.add_mutually_exclusive_group(required=True)
 policy_group.add_argument("--checkpoint", type=str, help="Path to an RSL-RL checkpoint.")
-policy_group.add_argument("--policy-jit", type=str, help="Path to an exported JIT policy.")
+policy_group.add_argument(
+    "--policy-jit",
+    type=str,
+    help=(
+        "Path to an exported JIT policy. Note: the stock IsaacLab exporter is not compatible with this task's "
+        "AsymmetricActorCritic adaptation policy."
+    ),
+)
 parser.add_argument("--num-envs", type=int, default=1, help="Number of environments to simulate.")
 parser.add_argument("--seed", type=int, default=0, help="Environment seed.")
 parser.add_argument("--forward-vel-x", type=float, default=0.4, help="Fixed forward velocity command.")
@@ -32,6 +40,12 @@ parser.add_argument("--output-csv", type=str, default=None, help="Optional CSV o
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
 
+livestream_enabled = str(os.environ.get("LIVESTREAM", "0")) not in ("", "0")
+if getattr(args_cli, "livestream", -1) not in (-1, 0):
+    livestream_enabled = True
+if livestream_enabled and not getattr(args_cli, "enable_cameras", False):
+    args_cli.enable_cameras = True
+
 app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
 
@@ -39,8 +53,12 @@ append_acc_source_dir()
 
 import acc  # noqa: F401
 
+import isaaclab.sim as sim_utils
 from isaaclab.envs import ManagerBasedRLEnv
+from isaaclab.markers import VisualizationMarkers, VisualizationMarkersCfg
+from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 from isaaclab.utils.assets import retrieve_file_path
+from isaaclab.utils.math import quat_from_euler_xyz, quat_from_angle_axis
 
 from acc.tasks.manager_based.uniFP_aliengo.mdp.utils import base_yaw_to_world, get_base_yaw_quat
 from acc.tasks.manager_based.uniFP_aliengo.unifpaliengo_eval_cfg import UniFPAliengoReversePushEvalCfg
@@ -102,6 +120,126 @@ def format_optional(value: float) -> str:
     return "n/a" if value != value else f"{value:.3f}"
 
 
+class ReversePushMarkers:
+    """Standalone visualization markers for command/current velocity and base force."""
+
+    def __init__(self, env: ManagerBasedRLEnv):
+        self.env = env
+        self.device = env.device
+        self.cmd_vel_markers = VisualizationMarkers(
+            VisualizationMarkersCfg(
+                prim_path="/Visuals/ReversePush/cmd_velocity",
+                markers={
+                    "arrow": sim_utils.UsdFileCfg(
+                        usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/UIElements/arrow_x.usd",
+                        scale=(0.6, 0.6, 0.6),
+                        visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(1.0, 0.0, 0.0)),
+                    ),
+                },
+            )
+        )
+        self.curr_vel_markers = VisualizationMarkers(
+            VisualizationMarkersCfg(
+                prim_path="/Visuals/ReversePush/current_velocity",
+                markers={
+                    "arrow": sim_utils.UsdFileCfg(
+                        usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/UIElements/arrow_x.usd",
+                        scale=(0.6, 0.6, 0.6),
+                        visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 0.9, 0.9)),
+                    ),
+                },
+            )
+        )
+        self.base_force_markers = VisualizationMarkers(
+            VisualizationMarkersCfg(
+                prim_path="/Visuals/ReversePush/base_force_ext",
+                markers={
+                    "arrow": sim_utils.UsdFileCfg(
+                        usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/UIElements/arrow_x.usd",
+                        scale=(1.0, 1.0, 1.0),
+                        visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 0.4, 1.0)),
+                    ),
+                },
+            )
+        )
+        self.cmd_vel_markers.set_visibility(True)
+        self.curr_vel_markers.set_visibility(True)
+        self.base_force_markers.set_visibility(True)
+        self._cmd_base_scale = torch.tensor((0.6, 0.6, 0.6), device=self.device, dtype=torch.float)
+        self._curr_base_scale = torch.tensor((0.6, 0.6, 0.6), device=self.device, dtype=torch.float)
+
+    def update(self):
+        robot = self.env.scene["robot"]
+        base_pos_w = robot.data.root_pos_w.clone()
+        vel_marker_pos_w = base_pos_w.clone()
+        vel_marker_pos_w[:, 2] += 0.5
+        force_marker_pos_w = base_pos_w.clone()
+        force_marker_pos_w[:, 2] += 0.2
+
+        base_yaw_quat = get_base_yaw_quat(self.env)
+        cmd_vel_b = self.env.command_manager.get_command("locomotion_commands")
+        cmd_vel_w = torch.zeros((self.env.num_envs, 3), device=self.device)
+        cmd_vel_w[:, :2] = base_yaw_to_world(
+            torch.nn.functional.pad(cmd_vel_b[:, :2], (0, 1)),
+            base_yaw_quat,
+        )[:, :2]
+
+        base_lin_vel_w = robot.data.root_lin_vel_w
+        base_force_ext_w = self.env.command_manager.get_command("base_force_ext")
+
+        self.cmd_vel_markers.visualize(
+            vel_marker_pos_w,
+            self._vectors_to_yaw_quat(cmd_vel_w),
+            scales=self._apply_speed_scale(cmd_vel_w, self._cmd_base_scale),
+        )
+        self.curr_vel_markers.visualize(
+            vel_marker_pos_w,
+            self._vectors_to_yaw_quat(base_lin_vel_w),
+            scales=self._apply_speed_scale(base_lin_vel_w, self._curr_base_scale),
+        )
+        self.base_force_markers.visualize(
+            force_marker_pos_w,
+            self._forces_to_quat(base_force_ext_w),
+            scales=self._forces_to_scales(base_force_ext_w),
+        )
+
+    def _vectors_to_yaw_quat(self, vectors_w: torch.Tensor) -> torch.Tensor:
+        yaw = torch.atan2(vectors_w[:, 1], vectors_w[:, 0])
+        zeros = torch.zeros_like(yaw)
+        return quat_from_euler_xyz(zeros, zeros, yaw)
+
+    def _apply_speed_scale(self, vel_w: torch.Tensor, base_scale: torch.Tensor) -> torch.Tensor:
+        speed = torch.norm(vel_w[:, :2], dim=-1)
+        speed_ref = 0.3
+        scale_factor = torch.clamp(speed / max(speed_ref, 1.0e-3), min=1.2, max=3.0)
+        scales = base_scale.unsqueeze(0).repeat(vel_w.shape[0], 1)
+        scales[:, 0] = scales[:, 0] * scale_factor
+        return scales
+
+    def _forces_to_quat(self, forces_w: torch.Tensor) -> torch.Tensor:
+        eps = 1.0e-6
+        mag = torch.linalg.norm(forces_w, dim=1)
+        direction = forces_w / (mag.unsqueeze(-1) + eps)
+        dot = torch.clamp(direction[:, 0], -1.0, 1.0)
+        angle = torch.acos(dot)
+        axis = torch.stack([torch.zeros_like(dot), -direction[:, 2], direction[:, 1]], dim=1)
+        axis_norm = torch.linalg.norm(axis, dim=1, keepdim=True)
+        default_axis = torch.zeros_like(axis)
+        default_axis[:, 2] = 1.0
+        axis = torch.where(axis_norm > eps, axis, default_axis)
+        axis = axis / torch.clamp(torch.linalg.norm(axis, dim=1, keepdim=True), min=eps)
+        quat = quat_from_angle_axis(angle, axis)
+        identity = torch.zeros((forces_w.shape[0], 4), device=forces_w.device)
+        identity[:, 0] = 1.0
+        return torch.where(mag.unsqueeze(-1) > eps, quat, identity)
+
+    def _forces_to_scales(self, forces_w: torch.Tensor) -> torch.Tensor:
+        mag = torch.linalg.norm(forces_w, dim=1)
+        length = torch.clamp(mag * 0.02, max=0.6)
+        thickness = torch.full_like(length, 0.05)
+        return torch.stack([length, thickness, thickness], dim=1)
+
+
 def main():
     output_csv = resolve_output_csv(args_cli.output_csv)
     env_cfg = build_env_cfg()
@@ -118,13 +256,20 @@ def main():
         env.reset()
         obs = wrapped_env.get_observations()
     else:
-        print(f"[INFO] Loading JIT policy: {jit_path}")
-        policy = load_jit_policy(jit_path, env.device)
-        obs, _ = env.reset()
+        raise RuntimeError(
+            "This task uses AsymmetricActorCritic with a history encoder, but IsaacLab's stock "
+            "export_policy_as_jit() only exports policy.actor and drops the encoder/adaptation path. "
+            "As a result, the exported policy.pt is not a faithful inference artifact for this task. "
+            "Use --checkpoint for reverse_push_eval, or add a custom exporter that wraps the full act_inference() path."
+        )
 
     force_term = env.command_manager.get_term("base_force_ext")
     if not hasattr(force_term, "set_force") or not hasattr(force_term, "clear_force"):
         raise TypeError("commands.base_force_ext must be a scripted force term exposing set_force()/clear_force().")
+    markers = ReversePushMarkers(env)
+
+    if livestream_enabled:
+        print("[INFO] LIVESTREAM enabled; cameras forced on for WebRTC compatibility.")
 
     step_dt = float(env.step_dt)
     max_steps = max(int(round(float(env_cfg.episode_length_s) / step_dt)), 1)
@@ -212,6 +357,8 @@ def main():
                     actions = policy(obs_tensor)
                     obs, _, terminated, truncated, _ = env.step(actions)
                     done_mask = (terminated | truncated).to(dtype=torch.bool, device=device)
+
+            markers.update()
 
             robot = env.scene["robot"]
             root_vel_xy = robot.data.root_lin_vel_w[:, :2]
