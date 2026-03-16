@@ -1187,7 +1187,7 @@ class EventCfg:
         func=mdp.my_randomize_rigid_body_mass,
         mode="startup",
         params={
-            "asset_cfg": SceneEntityCfg("robot", body_names="base"),
+            "asset_cfg": SceneEntityCfg("robot", body_names="trunk"),
             "mass_distribution_params": (0.0, 5.0),
             "operation": "add",  # 添加操作
             "distribution": "uniform",
