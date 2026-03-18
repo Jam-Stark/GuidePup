@@ -35,6 +35,9 @@ import torch
 import isaaclab_tasks  # noqa: F401
 from isaaclab_tasks.utils import parse_env_cfg
 
+from _extension_source import append_acc_source_dir
+
+append_acc_source_dir()
 import acc.tasks  # noqa: F401
 
 

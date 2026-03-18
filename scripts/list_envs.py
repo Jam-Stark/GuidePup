@@ -27,6 +27,9 @@ simulation_app = app_launcher.app
 import gymnasium as gym
 from prettytable import PrettyTable
 
+from _extension_source import append_acc_source_dir
+
+append_acc_source_dir()
 import acc.tasks  # noqa: F401
 
 

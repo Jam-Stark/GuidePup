@@ -13,9 +13,16 @@ a more user-friendly way.
 """Launch Isaac Sim Simulator first."""
 
 import argparse
+from pathlib import Path
 import sys
 
 from isaaclab.app import AppLauncher
+
+SCRIPTS_DIR = Path(__file__).resolve().parents[1]
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.append(str(SCRIPTS_DIR))
+
+from _extension_source import append_acc_source_dir
 
 # add argparse arguments
 parser = argparse.ArgumentParser(description="Train an RL agent with skrl.")
@@ -111,6 +118,7 @@ from isaaclab_rl.skrl import SkrlVecEnvWrapper
 import isaaclab_tasks  # noqa: F401
 from isaaclab_tasks.utils.hydra import hydra_task_config
 
+append_acc_source_dir()
 import acc.tasks  # noqa: F401
 
 # config shortcuts

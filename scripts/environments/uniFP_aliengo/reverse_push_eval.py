@@ -104,7 +104,9 @@ def load_raw_checkpoint_policy(checkpoint_path: str, env: ManagerBasedRLEnv):
     runner = OnPolicyRunnerAdaptation(wrapped_env, agent_cfg.to_dict(), log_dir=None, device=env.device)
     runner.load(checkpoint_path)
     policy = runner.get_inference_policy(device=env.device)
-    return policy, wrapped_env
+    estimator_model = runner.alg.policy
+    estimator_model.eval()
+    return policy, wrapped_env, estimator_model
 
 
 def base_forward_axis_xy(env: ManagerBasedRLEnv) -> torch.Tensor:
@@ -118,6 +120,46 @@ def base_forward_axis_xy(env: ManagerBasedRLEnv) -> torch.Tensor:
 
 def format_optional(value: float) -> str:
     return "n/a" if value != value else f"{value:.3f}"
+
+
+def extract_force_estimator_outputs(
+    obs,
+    estimator_model,
+    *,
+    gripper_force_scale: float,
+    base_force_scale: float,
+):
+    num_envs = obs.batch_size[0]
+    device = obs.device
+    nan_force = torch.full((num_envs, 3), float("nan"), device=device)
+    nan_err = torch.full((num_envs,), float("nan"), device=device)
+
+    if estimator_model is None or not hasattr(estimator_model, "predict") or "pred" not in obs:
+        return {
+            "gripper_force_est_local": nan_force.clone(),
+            "gripper_force_tgt_local": nan_force.clone(),
+            "gripper_force_err_l2": nan_err.clone(),
+            "base_force_est_local": nan_force.clone(),
+            "base_force_tgt_local": nan_force.clone(),
+            "base_force_err_l2": nan_err.clone(),
+        }
+
+    pred_target_scaled = obs["pred"]
+    pred_est_scaled = estimator_model.predict(obs)
+
+    gripper_force_est_local = pred_est_scaled[:, 6:9] / gripper_force_scale
+    gripper_force_tgt_local = pred_target_scaled[:, 6:9] / gripper_force_scale
+    base_force_est_local = pred_est_scaled[:, 9:12] / base_force_scale
+    base_force_tgt_local = pred_target_scaled[:, 9:12] / base_force_scale
+
+    return {
+        "gripper_force_est_local": gripper_force_est_local,
+        "gripper_force_tgt_local": gripper_force_tgt_local,
+        "gripper_force_err_l2": torch.linalg.norm(gripper_force_est_local - gripper_force_tgt_local, dim=-1),
+        "base_force_est_local": base_force_est_local,
+        "base_force_tgt_local": base_force_tgt_local,
+        "base_force_err_l2": torch.linalg.norm(base_force_est_local - base_force_tgt_local, dim=-1),
+    }
 
 
 class ReversePushMarkers:
@@ -244,15 +286,18 @@ def main():
     output_csv = resolve_output_csv(args_cli.output_csv)
     env_cfg = build_env_cfg()
     env = ManagerBasedRLEnv(cfg=env_cfg)
+    gripper_force_obs_scale = float(env_cfg.observations.pred.gripper_forces_local.scale)
+    base_force_obs_scale = float(env_cfg.observations.pred.base_forces_local.scale)
 
     checkpoint_path = retrieve_file_path(args_cli.checkpoint) if args_cli.checkpoint else None
     jit_path = retrieve_file_path(args_cli.policy_jit) if args_cli.policy_jit else None
 
     policy = None
     wrapped_env = None
+    estimator_model = None
     if checkpoint_path:
         print(f"[INFO] Loading raw checkpoint: {checkpoint_path}")
-        policy, wrapped_env = load_raw_checkpoint_policy(checkpoint_path, env)
+        policy, wrapped_env, estimator_model = load_raw_checkpoint_policy(checkpoint_path, env)
         env.reset()
         obs = wrapped_env.get_observations()
     else:
@@ -293,6 +338,11 @@ def main():
     reverse_detected = torch.zeros(num_envs, dtype=torch.bool, device=device)
     min_proj_disp = torch.full((num_envs,), float("inf"), device=device)
     max_proj_disp = torch.full((num_envs,), float("-inf"), device=device)
+    push_sample_count = torch.zeros(num_envs, dtype=torch.long, device=device)
+    base_force_err_push_sum = torch.zeros(num_envs, device=device)
+    base_force_err_push_max = torch.zeros(num_envs, device=device)
+    gripper_force_err_push_sum = torch.zeros(num_envs, device=device)
+    gripper_force_err_push_max = torch.zeros(num_envs, device=device)
 
     with output_csv.open("w", newline="") as csv_file:
         writer = csv.writer(csv_file)
@@ -311,6 +361,20 @@ def main():
                 "force_y",
                 "root_x",
                 "root_y",
+                "gripper_force_est_local_x",
+                "gripper_force_est_local_y",
+                "gripper_force_est_local_z",
+                "gripper_force_tgt_local_x",
+                "gripper_force_tgt_local_y",
+                "gripper_force_tgt_local_z",
+                "gripper_force_err_l2",
+                "base_force_est_local_x",
+                "base_force_est_local_y",
+                "base_force_est_local_z",
+                "base_force_tgt_local_x",
+                "base_force_tgt_local_y",
+                "base_force_tgt_local_z",
+                "base_force_err_l2",
             ]
         )
 
@@ -358,6 +422,13 @@ def main():
                     obs, _, terminated, truncated, _ = env.step(actions)
                     done_mask = (terminated | truncated).to(dtype=torch.bool, device=device)
 
+                estimator_outputs = extract_force_estimator_outputs(
+                    obs,
+                    estimator_model,
+                    gripper_force_scale=gripper_force_obs_scale,
+                    base_force_scale=base_force_obs_scale,
+                )
+
             markers.update()
 
             robot = env.scene["robot"]
@@ -366,6 +437,12 @@ def main():
             speed_xy = torch.norm(root_vel_xy, dim=-1)
             force_xy = env.command_manager.get_command("base_force_ext")[:, :2]
             cmd_vx = env.command_manager.get_command("locomotion_commands")[:, 0]
+            gripper_force_est_local = estimator_outputs["gripper_force_est_local"]
+            gripper_force_tgt_local = estimator_outputs["gripper_force_tgt_local"]
+            gripper_force_err_l2 = estimator_outputs["gripper_force_err_l2"]
+            base_force_est_local = estimator_outputs["base_force_est_local"]
+            base_force_tgt_local = estimator_outputs["base_force_tgt_local"]
+            base_force_err_l2 = estimator_outputs["base_force_err_l2"]
 
             forward_speed_proj = torch.zeros(num_envs, device=device)
             proj_disp = torch.zeros(num_envs, device=device)
@@ -388,6 +465,18 @@ def main():
                 min_proj_disp[triggered_ids] = torch.minimum(min_proj_disp[triggered_ids], proj_disp[triggered_ids])
                 max_proj_disp[triggered_ids] = torch.maximum(max_proj_disp[triggered_ids], proj_disp[triggered_ids])
 
+            if push_active.any():
+                active_ids = push_active.nonzero(as_tuple=False).squeeze(-1)
+                push_sample_count[active_ids] += 1
+                base_force_err_push_sum[active_ids] += base_force_err_l2[active_ids]
+                base_force_err_push_max[active_ids] = torch.maximum(
+                    base_force_err_push_max[active_ids], base_force_err_l2[active_ids]
+                )
+                gripper_force_err_push_sum[active_ids] += gripper_force_err_l2[active_ids]
+                gripper_force_err_push_max[active_ids] = torch.maximum(
+                    gripper_force_err_push_max[active_ids], gripper_force_err_l2[active_ids]
+                )
+
             log_time_s = (step + 1) * step_dt
             for env_id in range(num_envs):
                 writer.writerow(
@@ -405,6 +494,20 @@ def main():
                         f"{force_xy[env_id, 1].item():.6f}",
                         f"{root_pos_xy[env_id, 0].item():.6f}",
                         f"{root_pos_xy[env_id, 1].item():.6f}",
+                        f"{gripper_force_est_local[env_id, 0].item():.6f}",
+                        f"{gripper_force_est_local[env_id, 1].item():.6f}",
+                        f"{gripper_force_est_local[env_id, 2].item():.6f}",
+                        f"{gripper_force_tgt_local[env_id, 0].item():.6f}",
+                        f"{gripper_force_tgt_local[env_id, 1].item():.6f}",
+                        f"{gripper_force_tgt_local[env_id, 2].item():.6f}",
+                        f"{gripper_force_err_l2[env_id].item():.6f}",
+                        f"{base_force_est_local[env_id, 0].item():.6f}",
+                        f"{base_force_est_local[env_id, 1].item():.6f}",
+                        f"{base_force_est_local[env_id, 2].item():.6f}",
+                        f"{base_force_tgt_local[env_id, 0].item():.6f}",
+                        f"{base_force_tgt_local[env_id, 1].item():.6f}",
+                        f"{base_force_tgt_local[env_id, 2].item():.6f}",
+                        f"{base_force_err_l2[env_id].item():.6f}",
                     ]
                 )
 
@@ -420,6 +523,17 @@ def main():
         min_speed = min_forward_speed[env_id].item()
         min_disp = min_proj_disp[env_id].item()
         max_disp = max_proj_disp[env_id].item()
+        push_samples = int(push_sample_count[env_id].item())
+        base_force_err_push_mean = (
+            (base_force_err_push_sum[env_id] / push_sample_count[env_id]).item() if push_samples > 0 else float("nan")
+        )
+        base_force_err_peak = base_force_err_push_max[env_id].item() if push_samples > 0 else float("nan")
+        gripper_force_err_push_mean = (
+            (gripper_force_err_push_sum[env_id] / push_sample_count[env_id]).item()
+            if push_samples > 0
+            else float("nan")
+        )
+        gripper_force_err_peak = gripper_force_err_push_max[env_id].item() if push_samples > 0 else float("nan")
         if min_speed == float("inf"):
             min_speed = float("nan")
         if min_disp == float("inf"):
@@ -430,7 +544,11 @@ def main():
             f"[SUMMARY][env {env_id}] trigger_speed={format_optional(trig_speed)} "
             f"stop_time={format_optional(stop_time)} min_forward_speed={format_optional(min_speed)} "
             f"reverse={bool(reverse_detected[env_id].item())} "
-            f"proj_disp_min={format_optional(min_disp)} proj_disp_max={format_optional(max_disp)}"
+            f"proj_disp_min={format_optional(min_disp)} proj_disp_max={format_optional(max_disp)} "
+            f"base_force_err_push_mean={format_optional(base_force_err_push_mean)} "
+            f"base_force_err_peak={format_optional(base_force_err_peak)} "
+            f"gripper_force_err_push_mean={format_optional(gripper_force_err_push_mean)} "
+            f"gripper_force_err_peak={format_optional(gripper_force_err_peak)}"
         )
 
     env.close()

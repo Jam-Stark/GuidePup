@@ -4,10 +4,83 @@ from collections.abc import Sequence
 from dataclasses import MISSING
 
 import torch
-from isaaclab.managers import ActionTerm, ActionTermCfg
 from isaaclab.assets import Articulation, RigidObject
-from isaaclab.utils import configclass
 from isaaclab.envs import ManagerBasedEnv
+from isaaclab.envs.mdp.actions.actions_cfg import JointPositionActionCfg as IsaacLabJointPositionActionCfg
+from isaaclab.envs.mdp.actions.joint_actions import JointPositionAction as IsaacLabJointPositionAction
+from isaaclab.managers import ActionTerm, ActionTermCfg
+from isaaclab.utils import configclass
+from isaaclab.utils.buffers import DelayBuffer
+
+
+class DelayedJointPositionAction(IsaacLabJointPositionAction):
+    """Joint position action term with an episode-fixed env-step delay."""
+
+    cfg: "DelayedJointPositionActionCfg"
+
+    def __init__(self, cfg: "DelayedJointPositionActionCfg", env: ManagerBasedEnv):
+        super().__init__(cfg, env)
+        if cfg.min_delay_steps < 0:
+            raise ValueError(f"min_delay_steps must be non-negative, received: {cfg.min_delay_steps}")
+        if cfg.max_delay_steps < cfg.min_delay_steps:
+            raise ValueError(
+                f"max_delay_steps must be >= min_delay_steps, received: {(cfg.min_delay_steps, cfg.max_delay_steps)}"
+            )
+
+        self._delay_buffer = DelayBuffer(cfg.max_delay_steps, self.num_envs, device=self.device)
+        self._delayed_actions = torch.zeros_like(self.processed_actions)
+        self.reset()
+
+    def _resolve_delay_reset_ids(
+        self, env_ids: Sequence[int] | slice | torch.Tensor | None
+    ) -> tuple[Sequence[int] | slice, int]:
+        if env_ids is None or env_ids == slice(None):
+            return slice(None), self.num_envs
+        if isinstance(env_ids, slice):
+            start, stop, step = env_ids.indices(self.num_envs)
+            return env_ids, len(range(start, stop, step))
+        if isinstance(env_ids, torch.Tensor):
+            env_ids = env_ids.to(device=self.device, dtype=torch.long)
+            return env_ids, int(env_ids.numel())
+        env_ids = torch.tensor(list(env_ids), device=self.device, dtype=torch.long)
+        return env_ids, int(env_ids.numel())
+
+    def _sample_time_lags(self, num_envs: int) -> int | torch.Tensor:
+        if self.cfg.min_delay_steps == self.cfg.max_delay_steps:
+            return self.cfg.min_delay_steps
+        return torch.randint(
+            low=self.cfg.min_delay_steps,
+            high=self.cfg.max_delay_steps + 1,
+            size=(num_envs,),
+            dtype=torch.int,
+            device=self.device,
+        )
+
+    def process_actions(self, actions: torch.Tensor):
+        super().process_actions(actions)
+        self._delayed_actions[:] = self._delay_buffer.compute(self.processed_actions)
+
+    def apply_actions(self):
+        self._asset.set_joint_position_target(self._delayed_actions, joint_ids=self._joint_ids)
+
+    def reset(self, env_ids: Sequence[int] | slice | torch.Tensor | None = None):
+        super().reset(env_ids)
+        batch_ids, num_envs = self._resolve_delay_reset_ids(env_ids)
+        time_lags = self._sample_time_lags(num_envs)
+        self._delay_buffer.set_time_lag(time_lag=time_lags, batch_ids=batch_ids)
+        self._delay_buffer.reset(batch_ids)
+        self._processed_actions[batch_ids] = 0.0
+        self._delayed_actions[batch_ids] = 0.0
+
+
+@configclass
+class DelayedJointPositionActionCfg(IsaacLabJointPositionActionCfg):
+    """Configuration for a delayed joint position action term."""
+
+    class_type = DelayedJointPositionAction
+
+    min_delay_steps: int = 0
+    max_delay_steps: int = 0
 
 class VariableForceAction(ActionTerm):
     """

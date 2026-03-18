@@ -18,6 +18,7 @@ from isaaclab.managers.recorder_manager import RecorderManagerBaseCfg
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
+from isaaclab.utils import modifiers as modifier_utils
 from isaaclab.utils.noise import GaussianNoiseCfg
 
 from . import mdp
@@ -54,11 +55,24 @@ from .metrics import (
 # Global configuration constants
 ##
 FORCE_COMMAND_RESUME_STEPS = 0 * 24  # 恢复力命令的训练步数阈值
-FORCE_COMMAND_START_STEPS = 0 * 24  # 启用力命令的训练步数阈值
+FORCE_COMMAND_START_STEPS = 8000 * 24  # 启用力命令的训练步数阈值
 GRIPPER_EXT_FULL_RANGE = (0.0, 0.0)  # gripper力的完整范围
 GRIPPER_CMD_FULL_RANGE = (0.0, 0.0)  # gripper命令的完整范围
 BASE_EXT_FULL_RANGE = (-30.0, 30.0)  # base力的完整范围
 BASE_CMD_FULL_RANGE = (-30.0, 30.0)  # base命令的完整范围
+POLICY_OBS_DELAY_RANGE_STEPS = (0, 2)  # policy观测延迟范围（env steps）
+LEG_ACTION_DELAY_RANGE_STEPS = (0, 1)  # 腿部动作延迟范围（env steps）
+
+
+def make_policy_obs_delay_modifier_cfg() -> modifier_utils.ModifierCfg:
+    """Create a fresh delay modifier config for a policy observation term."""
+    return modifier_utils.ModifierCfg(
+        func=mdp.RandomizedDelayModifier,
+        params={
+            "min_delay_steps": POLICY_OBS_DELAY_RANGE_STEPS[0],
+            "max_delay_steps": POLICY_OBS_DELAY_RANGE_STEPS[1],
+        },
+    )
 
 
 ##
@@ -99,9 +113,9 @@ class CommandsCfg:
         class Ranges:
             """Ranges for the commands."""
 
-            lin_vel_x: Tuple[float, float] = (-0.6, 0.6)
-            lin_vel_y: Tuple[float, float] = (-0.4, 0.4)
-            ang_vel_z: Tuple[float, float] = (-0.6, 0.6)
+            lin_vel_x: Tuple[float, float] = (-1.0, 1.0)
+            lin_vel_y: Tuple[float, float] = (-0.5, 0.5)
+            ang_vel_z: Tuple[float, float] = (-1.0, 1.0)
             heading: Tuple[float, float] = (-math.pi, math.pi)
 
         # 命令范围
@@ -561,7 +575,7 @@ class UniFPSceneCfg(InteractiveSceneCfg):
 class ActionsCfg:
     """Action specifications for the MDP."""
 
-    leg_actions = mdp.JointPositionActionCfg(
+    leg_actions = mdp.DelayedJointPositionActionCfg(
         asset_name="robot",
         joint_names=[
             "FL_hip_joint", "FR_hip_joint", "RL_hip_joint", "RR_hip_joint",
@@ -570,7 +584,9 @@ class ActionsCfg:
         ],
         scale=0.25,
         use_default_offset=True,
-        clip={".*": (-100.0, 100.0)}
+        clip={".*": (-100.0, 100.0)},
+        min_delay_steps=LEG_ACTION_DELAY_RANGE_STEPS[0],
+        max_delay_steps=LEG_ACTION_DELAY_RANGE_STEPS[1],
     )
     arm_actions = mdp.JointPositionActionCfg(
         asset_name="robot",
@@ -633,6 +649,7 @@ class ObservationsCfg:
         base_orientation = ObsTerm(
             func=mdp.base_orientation_2d,
             params={"asset_cfg": SceneEntityCfg("robot")},
+            modifiers=[make_policy_obs_delay_modifier_cfg()],
             noise=GaussianNoiseCfg(mean=0.0, std=0.05, operation="add"),
             clip=(-100.0, 100.0)
         )
@@ -640,6 +657,7 @@ class ObservationsCfg:
         base_ang_vel = ObsTerm(
             func=mdp.base_ang_vel,
             params={"asset_cfg": SceneEntityCfg("robot")},
+            modifiers=[make_policy_obs_delay_modifier_cfg()],
             noise=GaussianNoiseCfg(mean=0.0, std=0.2, operation="add"),
             scale=0.25,
             clip=(-100.0, 100.0)
@@ -654,6 +672,7 @@ class ObservationsCfg:
                 "RL_calf_joint", "RR_calf_joint", "arm_joint1", "arm_joint2",
                 "arm_joint3", "arm_joint4", "arm_joint5"
             ])},
+            modifiers=[make_policy_obs_delay_modifier_cfg()],
             noise=GaussianNoiseCfg(mean=0.0, std=0.01, operation="add"),
             scale=1.0,
             clip=(-100.0, 100.0)
@@ -670,6 +689,7 @@ class ObservationsCfg:
                     "RL_calf_joint", "RR_calf_joint", "arm_joint1", "arm_joint2",
                     "arm_joint3", "arm_joint4", "arm_joint5"
                 ])},
+            modifiers=[make_policy_obs_delay_modifier_cfg()],
             noise=GaussianNoiseCfg(mean=0.0, std=1.5, operation="add"),
             scale=0.05,
             clip=(-100.0, 100.0)
@@ -1200,7 +1220,7 @@ class EventCfg:
         func=mdp.my_randomize_rigid_body_com,
         mode="startup",
         params={
-            "asset_cfg": SceneEntityCfg("robot", body_names="base"),
+            "asset_cfg": SceneEntityCfg("robot", body_names="trunk"),
             "com_range": {
                 "x": (-0.1, 0.1),
                 "y": (-0.1, 0.1),

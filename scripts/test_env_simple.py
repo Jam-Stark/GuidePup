@@ -10,6 +10,8 @@ import argparse
 # Isaac Sim启动器必须在所有Isaac相关导入之前
 from isaaclab.app import AppLauncher
 
+from _extension_source import append_acc_source_dir
+
 # 添加命令行参数
 parser = argparse.ArgumentParser(description="测试环境初始化")
 parser.add_argument("--num_envs", type=int, default=1, help="并行环境数量")
@@ -23,6 +25,7 @@ app_launcher = AppLauncher(args)
 simulation_app = app_launcher.app
 
 # 现在可以安全地导入Isaac Lab模块
+append_acc_source_dir()
 try:
     from acc.tasks.manager_based.acc.acc_env_cfg import AccEnvCfg, AccSceneCfg
     from isaaclab.envs import ManagerBasedRLEnv
