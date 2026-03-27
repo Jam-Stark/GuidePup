@@ -18,6 +18,7 @@ from isaaclab.utils.math import quat_apply, quat_inv
 
 from isaaclab.envs import ManagerBasedRLEnv
 from isaaclab.utils.math import transform_points
+from .io_descriptor_compat import generic_io_descriptor, record_dtype, record_shape
 from .utils import (
     _get_force_command,
     base_yaw_to_world,
@@ -29,6 +30,30 @@ from .utils import (
     spherical_to_cartesian,
     world_to_base_yaw,
 )
+
+
+def _to_descriptor_list(value) -> list | None:
+    if value is None:
+        return None
+    if isinstance(value, torch.Tensor):
+        return value.detach().cpu().numpy().tolist()
+    if isinstance(value, (tuple, list)):
+        return list(value)
+    return [value]
+
+
+def _record_gait_command_name(output: torch.Tensor, descriptor, **kwargs) -> None:
+    descriptor.command_name = kwargs.get("gait_command_name", "gait_phase")
+
+
+def _record_command_aggregate_metadata(output: torch.Tensor, descriptor, **kwargs) -> None:
+    descriptor.command_term_names = {
+        "locomotion": kwargs.get("locomotion_command_name", "locomotion_commands"),
+        "target_position": kwargs.get("target_position_command_name", "target_position_commands"),
+        "gripper_force": kwargs.get("gripper_force_command_name", "gripper_force_command"),
+        "base_force": kwargs.get("base_force_command_name", "base_force_command"),
+    }
+    descriptor.command_scales = _to_descriptor_list(kwargs.get("scales"))
 
 
 def ee_pos_in_base_frame(env, gripper_cfg: SceneEntityCfg) -> torch.Tensor:
@@ -140,6 +165,12 @@ def ee_tracking_error_in_base_frame(env, command_name: str, gripper_cfg: SceneEn
     return tracking_error.view(env.num_envs, -1)
 
 
+@generic_io_descriptor(
+    observation_type="RootState",
+    units="unit",
+    axes=["projected_gravity_x", "projected_gravity_y"],
+    on_inspect=[record_shape, record_dtype],
+)
 def base_orientation_2d(
     env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg
 ) -> torch.Tensor:
@@ -325,6 +356,12 @@ def gait_clock_signal_per_foot(
     return final_signals
 
 
+@generic_io_descriptor(
+    observation_type="Command",
+    units="unit",
+    axes=["sin_phase", "cos_phase"],
+    on_inspect=[record_shape, record_dtype, _record_gait_command_name],
+)
 def gait_clock_signal(
     env: ManagerBasedRLEnv,
     gait_command_name: str = "gait_phase",
@@ -513,6 +550,28 @@ def ref_dof_pos_error(env: ManagerBasedRLEnv, gait_command_name: str, target_joi
     return ref - current
 
 
+@generic_io_descriptor(
+    observation_type="Command",
+    units="mixed",
+    axes=[
+        "base_lin_vel_x",
+        "base_lin_vel_y",
+        "base_ang_vel_z",
+        "ee_sphere_radius",
+        "ee_sphere_pitch",
+        "ee_sphere_yaw",
+        "ee_orient_roll",
+        "ee_orient_pitch",
+        "ee_orient_yaw",
+        "gripper_force_x",
+        "gripper_force_y",
+        "gripper_force_z",
+        "base_force_x",
+        "base_force_y",
+        "base_force_z",
+    ],
+    on_inspect=[record_shape, record_dtype, _record_command_aggregate_metadata],
+)
 def all_commands_with_scales(
     env: ManagerBasedRLEnv,
     scales: Sequence[float] | torch.Tensor,

@@ -12,6 +12,8 @@ from isaaclab.managers import ActionTerm, ActionTermCfg
 from isaaclab.utils import configclass
 from isaaclab.utils.buffers import DelayBuffer
 
+from .io_descriptor_compat import GenericActionIODescriptor
+
 
 class DelayedJointPositionAction(IsaacLabJointPositionAction):
     """Joint position action term with an episode-fixed env-step delay."""
@@ -62,6 +64,13 @@ class DelayedJointPositionAction(IsaacLabJointPositionAction):
 
     def apply_actions(self):
         self._asset.set_joint_position_target(self._delayed_actions, joint_ids=self._joint_ids)
+
+    @property
+    def IO_descriptor(self) -> GenericActionIODescriptor:
+        descriptor = super().IO_descriptor
+        descriptor.delay_range_steps = [int(self.cfg.min_delay_steps), int(self.cfg.max_delay_steps)]
+        descriptor.use_default_offset = bool(self.cfg.use_default_offset)
+        return descriptor
 
     def reset(self, env_ids: Sequence[int] | slice | torch.Tensor | None = None):
         super().reset(env_ids)
@@ -440,6 +449,22 @@ class ApplyForceCommandAction(ActionTerm):
     def processed_actions(self) -> torch.Tensor:
         return self._command
 
+    @property
+    def IO_descriptor(self) -> GenericActionIODescriptor:
+        descriptor = super().IO_descriptor
+        descriptor.shape = (self.action_dim,)
+        descriptor.dtype = str(self.raw_actions.dtype)
+        descriptor.action_type = "ForceCommandAction"
+        descriptor.asset_name = self.cfg.asset_name
+        descriptor.body_name = self.cfg.body_name
+        descriptor.command_name = self.cfg.command_name
+        descriptor.is_global = bool(self._is_global)
+        return descriptor
+
+    @property
+    def export_IO_descriptor(self) -> bool:
+        return self.action_dim > 0
+
     def process_actions(self, actions: torch.Tensor):
         if self.action_dim > 0:
             self._raw_actions[:] = actions.to(self.device)
@@ -479,6 +504,10 @@ class FixedJointPositionAction(ActionTerm):
     @property
     def processed_actions(self) -> torch.Tensor:
         return self._default_pos
+
+    @property
+    def export_IO_descriptor(self) -> bool:
+        return self.action_dim > 0
 
     def process_actions(self, actions: torch.Tensor):
         if self.action_dim > 0:

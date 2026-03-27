@@ -1,0 +1,556 @@
+observations:
+  policy:
+  - name: base_orientation_2d
+    overloads:
+      clip:
+      - -100.0
+      - 100.0
+      scale: null
+      history_length: 32
+      flatten_history_dim: true
+    extras:
+      units: unit
+      axes:
+      - projected_gravity_x
+      - projected_gravity_y
+      description: 'Get the 2D orientation of the base (roll and pitch from projected
+        gravity). Args: env: The manager-based RL environment instance. asset_cfg:
+        Configuration for the robot asset. Returns: Tensor of shape (num_envs, 2)
+        containing x and y components of projected gravity.'
+      modifiers:
+      - __class__: isaaclab.utils.modifiers.modifier_cfg.ModifierCfg
+        func: <acc.tasks.manager_based.uniFP_aliengo.mdp.modifiers.RandomizedDelayModifier
+          object at 0x796c2ec0a1d0>
+        params:
+          min_delay_steps: 0
+          max_delay_steps: 2
+    mdp_type: Observation
+    full_path: acc.tasks.manager_based.uniFP_aliengo.mdp.observation_compute.base_orientation_2d
+    shape:
+    - 2
+    dtype: torch.float32
+    observation_type: RootState
+  - name: base_ang_vel
+    overloads:
+      clip:
+      - -100.0
+      - 100.0
+      scale: 0.25
+      history_length: 32
+      flatten_history_dim: true
+    extras:
+      units: rad/s
+      axes:
+      - X
+      - Y
+      - Z
+      description: Root angular velocity in the asset's root frame.
+      modifiers:
+      - __class__: isaaclab.utils.modifiers.modifier_cfg.ModifierCfg
+        func: <acc.tasks.manager_based.uniFP_aliengo.mdp.modifiers.RandomizedDelayModifier
+          object at 0x796caf1f0a90>
+        params:
+          min_delay_steps: 0
+          max_delay_steps: 2
+    mdp_type: Observation
+    full_path: isaaclab.envs.mdp.observations.base_ang_vel
+    shape:
+    - 3
+    dtype: torch.float32
+    observation_type: RootState
+  - name: joint_pos_rel
+    overloads:
+      clip:
+      - -100.0
+      - 100.0
+      scale: 1.0
+      history_length: 32
+      flatten_history_dim: true
+    extras:
+      units: rad
+      description: 'The joint positions of the asset w.r.t. the default joint positions.
+        Note: Only the joints configured in :attr:`asset_cfg.joint_ids` will have
+        their positions returned.'
+      modifiers:
+      - __class__: isaaclab.utils.modifiers.modifier_cfg.ModifierCfg
+        func: <acc.tasks.manager_based.uniFP_aliengo.mdp.modifiers.RandomizedDelayModifier
+          object at 0x796caf1f2150>
+        params:
+          min_delay_steps: 0
+          max_delay_steps: 2
+    mdp_type: Observation
+    full_path: isaaclab.envs.mdp.observations.joint_pos_rel
+    shape:
+    - 17
+    dtype: torch.float32
+    observation_type: JointState
+    joint_names:
+    - FL_hip_joint
+    - FR_hip_joint
+    - RL_hip_joint
+    - RR_hip_joint
+    - FL_thigh_joint
+    - FR_thigh_joint
+    - RL_thigh_joint
+    - RR_thigh_joint
+    - arm_joint1
+    - FL_calf_joint
+    - FR_calf_joint
+    - RL_calf_joint
+    - RR_calf_joint
+    - arm_joint2
+    - arm_joint3
+    - arm_joint4
+    - arm_joint5
+    joint_pos_offsets:
+    - 0.10000000149011612
+    - -0.10000000149011612
+    - 0.10000000149011612
+    - -0.10000000149011612
+    - 0.5
+    - 0.5
+    - 0.5
+    - 0.5
+    - 0.0
+    - -1.0
+    - -1.0
+    - -1.0
+    - -1.0
+    - 1.4800000190734863
+    - -0.6299999952316284
+    - -0.8399999737739563
+    - 0.0
+  - name: joint_vel_rel
+    overloads:
+      clip:
+      - -100.0
+      - 100.0
+      scale: 0.05000000074505806
+      history_length: 32
+      flatten_history_dim: true
+    extras:
+      units: rad/s
+      description: 'The joint velocities of the asset w.r.t. the default joint velocities.
+        Note: Only the joints configured in :attr:`asset_cfg.joint_ids` will have
+        their velocities returned.'
+      modifiers:
+      - __class__: isaaclab.utils.modifiers.modifier_cfg.ModifierCfg
+        func: <acc.tasks.manager_based.uniFP_aliengo.mdp.modifiers.RandomizedDelayModifier
+          object at 0x796c2ec08910>
+        params:
+          min_delay_steps: 0
+          max_delay_steps: 2
+    mdp_type: Observation
+    full_path: isaaclab.envs.mdp.observations.joint_vel_rel
+    shape:
+    - 17
+    dtype: torch.float32
+    observation_type: JointState
+    joint_names:
+    - FL_hip_joint
+    - FR_hip_joint
+    - RL_hip_joint
+    - RR_hip_joint
+    - FL_thigh_joint
+    - FR_thigh_joint
+    - RL_thigh_joint
+    - RR_thigh_joint
+    - arm_joint1
+    - FL_calf_joint
+    - FR_calf_joint
+    - RL_calf_joint
+    - RR_calf_joint
+    - arm_joint2
+    - arm_joint3
+    - arm_joint4
+    - arm_joint5
+    joint_vel_offsets:
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+  - name: last_action
+    overloads:
+      clip:
+      - -100.0
+      - 100.0
+      scale: null
+      history_length: 32
+      flatten_history_dim: true
+    extras:
+      description: The last input action to the environment. The name of the action
+        term for which the action is required. If None, the entire action tensor is
+        returned.
+      modifiers: null
+    mdp_type: Observation
+    full_path: isaaclab.envs.mdp.observations.last_action
+    shape:
+    - 17
+    dtype: torch.float32
+    observation_type: Action
+  - name: gait_clock_signal
+    overloads:
+      clip:
+      - -100.0
+      - 100.0
+      scale: null
+      history_length: 32
+      flatten_history_dim: true
+    extras:
+      units: unit
+      axes:
+      - sin_phase
+      - cos_phase
+      description: 计算全局步态时钟信号（2维：sin, cos）
+      modifiers: null
+    mdp_type: Observation
+    full_path: acc.tasks.manager_based.uniFP_aliengo.mdp.observation_compute.gait_clock_signal
+    shape:
+    - 2
+    dtype: torch.float32
+    observation_type: Command
+    command_name: gait_phase
+  - name: all_commands_with_scales
+    overloads:
+      clip:
+      - -100.0
+      - 100.0
+      scale: null
+      history_length: 32
+      flatten_history_dim: true
+    extras:
+      units: mixed
+      axes:
+      - base_lin_vel_x
+      - base_lin_vel_y
+      - base_ang_vel_z
+      - ee_sphere_radius
+      - ee_sphere_pitch
+      - ee_sphere_yaw
+      - ee_orient_roll
+      - ee_orient_pitch
+      - ee_orient_yaw
+      - gripper_force_x
+      - gripper_force_y
+      - gripper_force_z
+      - base_force_x
+      - base_force_y
+      - base_force_z
+      description: Aggregate commands; EE goal is spherical in a yaw-only, sphere-centered
+        frame.
+      modifiers: null
+    mdp_type: Observation
+    full_path: acc.tasks.manager_based.uniFP_aliengo.mdp.observation_compute.all_commands_with_scales
+    shape:
+    - 15
+    dtype: torch.float32
+    observation_type: Command
+    command_term_names:
+      locomotion: locomotion_commands
+      target_position: target_position_commands
+      gripper_force: gripper_force_command
+      base_force: base_force_command
+    command_scales:
+    - 2.0
+    - 2.0
+    - 0.25
+    - 0.5
+    - 1.0
+    - 1.3
+    - 0.5
+    - 0.5
+    - 0.5
+    - 0.01
+    - 0.01
+    - 0.01
+    - 0.01
+    - 0.01
+    - 0.01
+actions:
+- name: leg_actions
+  mdp_type: Action
+  full_path: acc.tasks.manager_based.uniFP_aliengo.mdp.actions.DelayedJointPositionAction
+  shape:
+  - 12
+  dtype: torch.float32
+  extras:
+    description: Joint position action term with an episode-fixed env-step delay.
+  action_type: JointAction
+  joint_names:
+  - FL_hip_joint
+  - FR_hip_joint
+  - RL_hip_joint
+  - RR_hip_joint
+  - FL_thigh_joint
+  - FR_thigh_joint
+  - RL_thigh_joint
+  - RR_thigh_joint
+  - FL_calf_joint
+  - FR_calf_joint
+  - RL_calf_joint
+  - RR_calf_joint
+  scale: 0.25
+  offset:
+  - 0.10000000149011612
+  - -0.10000000149011612
+  - 0.10000000149011612
+  - -0.10000000149011612
+  - 0.5
+  - 0.5
+  - 0.5
+  - 0.5
+  - -1.0
+  - -1.0
+  - -1.0
+  - -1.0
+  clip:
+  - - -100.0
+    - 100.0
+  - - -100.0
+    - 100.0
+  - - -100.0
+    - 100.0
+  - - -100.0
+    - 100.0
+  - - -100.0
+    - 100.0
+  - - -100.0
+    - 100.0
+  - - -100.0
+    - 100.0
+  - - -100.0
+    - 100.0
+  - - -100.0
+    - 100.0
+  - - -100.0
+    - 100.0
+  - - -100.0
+    - 100.0
+  - - -100.0
+    - 100.0
+  delay_range_steps:
+  - 0
+  - 1
+- name: arm_actions
+  mdp_type: Action
+  full_path: isaaclab.envs.mdp.actions.joint_actions.JointPositionAction
+  shape:
+  - 5
+  dtype: torch.float32
+  extras:
+    description: Joint action term that applies the processed actions to the articulation's
+      joints as position commands.
+  action_type: JointAction
+  joint_names:
+  - arm_joint1
+  - arm_joint2
+  - arm_joint3
+  - arm_joint4
+  - arm_joint5
+  scale: 0.25
+  offset:
+  - 0.0
+  - 1.4800000190734863
+  - -0.6299999952316284
+  - -0.8399999737739563
+  - 0.0
+  clip:
+  - - -100.0
+    - 100.0
+  - - -100.0
+    - 100.0
+  - - -100.0
+    - 100.0
+  - - -100.0
+    - 100.0
+  - - -100.0
+    - 100.0
+articulations:
+  robot:
+    joint_names:
+    - FL_hip_joint
+    - FR_hip_joint
+    - RL_hip_joint
+    - RR_hip_joint
+    - FL_thigh_joint
+    - FR_thigh_joint
+    - RL_thigh_joint
+    - RR_thigh_joint
+    - arm_joint1
+    - FL_calf_joint
+    - FR_calf_joint
+    - RL_calf_joint
+    - RR_calf_joint
+    - arm_joint2
+    - arm_joint3
+    - arm_joint4
+    - arm_joint5
+    - arm_joint6
+    default_joint_pos:
+    - 0.10000000149011612
+    - -0.10000000149011612
+    - 0.10000000149011612
+    - -0.10000000149011612
+    - 0.5
+    - 0.5
+    - 0.5
+    - 0.5
+    - 0.0
+    - -1.0
+    - -1.0
+    - -1.0
+    - -1.0
+    - 1.4800000190734863
+    - -0.6299999952316284
+    - -0.8399999737739563
+    - 0.0
+    - 1.5700000524520874
+    default_joint_vel:
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    default_joint_pos_limits:
+    - - -1.221730351448059
+      - 1.221730351448059
+    - - -1.221730351448059
+      - 1.221730351448059
+    - - -1.221730351448059
+      - 1.221730351448059
+    - - -1.221730351448059
+      - 1.221730351448059
+    - - -0.5239999294281006
+      - 3.926999807357788
+    - - -0.5239999294281006
+      - 3.926999807357788
+    - - -0.5239999294281006
+      - 3.926999807357788
+    - - -0.5239999294281006
+      - 3.926999807357788
+    - - -2.6179935932159424
+      - 2.6179935932159424
+    - - -2.775073289871216
+      - -0.6457717418670654
+    - - -2.775073289871216
+      - -0.6457717418670654
+    - - -2.775073289871216
+      - -0.6457717418670654
+    - - -2.775073289871216
+      - -0.6457717418670654
+    - - 0.0
+      - 2.967059373855591
+    - - -2.8797929286956787
+      - 0.0
+    - - -1.518436312675476
+      - 1.518436312675476
+    - - -1.3439035415649414
+      - 1.3439035415649414
+    - - -2.7925264835357666
+      - 2.7925264835357666
+    default_joint_damping:
+    - 2.5
+    - 2.5
+    - 2.5
+    - 2.5
+    - 2.5
+    - 2.5
+    - 2.5
+    - 2.5
+    - 1.5
+    - 3.0
+    - 3.0
+    - 3.0
+    - 3.0
+    - 3.0
+    - 1.5
+    - 1.5
+    - 1.5
+    - 1.5
+    default_joint_stiffness:
+    - 80.0
+    - 80.0
+    - 80.0
+    - 80.0
+    - 80.0
+    - 80.0
+    - 80.0
+    - 80.0
+    - 64.0
+    - 160.0
+    - 160.0
+    - 160.0
+    - 160.0
+    - 128.0
+    - 64.0
+    - 64.0
+    - 64.0
+    - 64.0
+    default_joint_friction:
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    default_joint_armature:
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+scene:
+  physics_dt: 0.005
+  dt: 0.02
+  decimation: 4

@@ -1,4 +1,4 @@
 PUBLIC_IP=10.13.11.197 LIVESTREAM=1 ENABLE_CAMERAS=1 \
-python scripts/environments/uniFP_aliengo/reverse_push_eval.py \
+python scripts/experiments/uniFP_aliengo/reverse_push_eval.py \
   --checkpoint logs/rsl_rl/uniFP_aliengo_position_force/2026-02-28_20-56-35_cfg33/model_19800.pt \
   --push-force-n 30
