@@ -153,6 +153,7 @@ class UniFPPolicyMetadata:
     default_gripper_force_cmd: tuple[float, float, float] = (0.0, 0.0, 0.0)
     default_base_force_cmd: tuple[float, float, float] = (0.0, 0.0, 0.0)
     freeze_arm_actions: bool = False
+    action_clip: float = 100.0
     joint_actuator_gains: dict[str, tuple[float, float]] = field(default_factory=_default_joint_actuator_gains)
 
     @property
@@ -190,6 +191,7 @@ class UniFPPolicyMetadata:
             "default_gripper_force_cmd": list(self.default_gripper_force_cmd),
             "default_base_force_cmd": list(self.default_base_force_cmd),
             "freeze_arm_actions": self.freeze_arm_actions,
+            "action_clip": self.action_clip,
             "joint_actuator_gains": {
                 joint_name: [kp, kv] for joint_name, (kp, kv) in self.joint_actuator_gains.items()
             },
@@ -240,6 +242,7 @@ class UniFPPolicyMetadata:
                 float(v) for v in raw.get("default_base_force_cmd", base.default_base_force_cmd)
             ),
             freeze_arm_actions=bool(raw.get("freeze_arm_actions", base.freeze_arm_actions)),
+            action_clip=float(raw.get("action_clip", base.action_clip)),
             joint_actuator_gains=joint_actuator_gains,
         )
 
@@ -259,24 +262,27 @@ def default_runtime_metadata() -> UniFPPolicyMetadata:
 
 
 def default_staged_eval_metadata() -> UniFPPolicyMetadata:
+    # MuJoCo PD gain compensation: PhysX implicit PD is stiffer than MuJoCo's
+    # semi-explicit position actuator. Scale kp×0.6, kv×0.7 to match the
+    # effective closed-loop response. Original IsaacLab gains in comments.
     gains = {
-        "FL_hip_joint": (180.0, 4.0),
-        "FR_hip_joint": (180.0, 4.0),
-        "RL_hip_joint": (180.0, 4.0),
-        "RR_hip_joint": (180.0, 4.0),
-        "FL_thigh_joint": (180.0, 4.0),
-        "FR_thigh_joint": (180.0, 4.0),
-        "RL_thigh_joint": (180.0, 4.0),
-        "RR_thigh_joint": (180.0, 4.0),
-        "FL_calf_joint": (300.0, 6.5),
-        "FR_calf_joint": (300.0, 6.5),
-        "RL_calf_joint": (300.0, 6.5),
-        "RR_calf_joint": (300.0, 6.5),
-        "arm_joint1": (64.0, 2.0),
-        "arm_joint2": (128.0, 3.0),
-        "arm_joint3": (64.0, 2.0),
-        "arm_joint4": (64.0, 2.0),
-        "arm_joint5": (64.0, 2.0),
+        "FL_hip_joint": (108.0, 2.8),     # IsaacLab: (180, 4.0)
+        "FR_hip_joint": (108.0, 2.8),
+        "RL_hip_joint": (108.0, 2.8),
+        "RR_hip_joint": (108.0, 2.8),
+        "FL_thigh_joint": (108.0, 2.8),
+        "FR_thigh_joint": (108.0, 2.8),
+        "RL_thigh_joint": (108.0, 2.8),
+        "RR_thigh_joint": (108.0, 2.8),
+        "FL_calf_joint": (180.0, 4.55),   # IsaacLab: (300, 6.5)
+        "FR_calf_joint": (180.0, 4.55),
+        "RL_calf_joint": (180.0, 4.55),
+        "RR_calf_joint": (180.0, 4.55),
+        "arm_joint1": (38.4, 1.4),        # IsaacLab: (64, 2.0)
+        "arm_joint2": (76.8, 2.1),        # IsaacLab: (128, 3.0)
+        "arm_joint3": (38.4, 1.4),
+        "arm_joint4": (38.4, 1.4),
+        "arm_joint5": (38.4, 1.4),
     }
     return replace(
         default_runtime_metadata(),
@@ -1013,3 +1019,116 @@ def configure_tracking_viewer_camera(
     viewer.cam.elevation = float(elevation)
     viewer.cam.lookat[:] = data.xpos[track_body_id]
     viewer.cam.lookat[2] += float(z_offset)
+
+
+def _add_arrow(
+    mujoco_mod,
+    scene,
+    origin: np.ndarray,
+    vector: np.ndarray,
+    rgba: np.ndarray,
+    radius: float = 0.012,
+    *,
+    arrow_type: int | None = None,
+    min_length: float = 0.02,
+) -> None:
+    """Add a single arrow to the viewer scene.
+
+    Args:
+        mujoco_mod: The ``mujoco`` module (passed to avoid a hard import).
+        scene: ``mujoco.MjvScene`` obtained from the passive viewer.
+        origin: 3-D start point of the arrow (world frame).
+        vector: 3-D direction+magnitude of the arrow (world frame).
+        rgba: RGBA colour as a float32 array of length 4.
+        radius: Shaft thickness; for LINE type this is pixel width.
+        arrow_type: ``mjtGeom`` enum value.  Defaults to ``mjGEOM_ARROW1``
+            (single-headed arrow, head at *to* end).
+        min_length: Arrows shorter than this are not drawn.
+    """
+    length = float(np.linalg.norm(vector))
+    if length < min_length or scene.ngeom >= scene.maxgeom:
+        return
+    if arrow_type is None:
+        arrow_type = mujoco_mod.mjtGeom.mjGEOM_ARROW1
+    tip = (np.asarray(origin, dtype=np.float64) + np.asarray(vector, dtype=np.float64))
+    scene.ngeom += 1
+    g = scene.geoms[scene.ngeom - 1]
+    mujoco_mod.mjv_initGeom(
+        g, arrow_type, np.zeros(3), np.zeros(3), np.zeros(9),
+        np.asarray(rgba, dtype=np.float32),
+    )
+    mujoco_mod.mjv_connector(
+        g, arrow_type, radius,
+        np.asarray(origin, dtype=np.float64),
+        np.asarray(tip, dtype=np.float64),
+    )
+
+
+def draw_velocity_arrows(
+    mujoco_mod,
+    viewer,
+    data: "mujoco.MjData",
+    *,
+    trunk_body_id: int,
+    command_vel_xy: np.ndarray | None = None,
+    external_force_w: np.ndarray | None = None,
+    vel_scale: float = 0.5,
+    force_scale: float = 0.02,
+    arrow_z_offset: float = 0.14,
+    force_arrow_z_extra_offset: float = 0.0,
+) -> None:
+    """Draw velocity, command, and force arrows attached to the robot trunk.
+
+    Call this **after** ``viewer.sync()``'s scene update, from a
+    ``launch_passive`` loop, by using the viewer's internal scene object.
+
+    Args:
+        mujoco_mod: The ``mujoco`` module.
+        viewer: A passive viewer instance (has ``.user_scn``).
+        data: Current simulation data.
+        trunk_body_id: Body id of the robot trunk.
+        command_vel_xy: Desired base velocity (x, y) before Isaac scaling.
+        external_force_w: World-frame external force 3-D vector.
+        vel_scale: Visual length = actual_speed * vel_scale.
+        force_scale: Visual length = force_magnitude * force_scale.
+        arrow_z_offset: Height above trunk CoM to anchor arrows.
+        force_arrow_z_extra_offset: Additional height applied only to the force arrow.
+    """
+    scene = viewer.user_scn
+    # Reset user scene each frame
+    scene.ngeom = 0
+
+    trunk_pos = data.xpos[trunk_body_id].copy()
+    origin = trunk_pos.copy()
+    origin[2] += arrow_z_offset
+
+    # --- 1. Current velocity (blue) ---
+    vel_world = data.qvel[:3].copy()  # linear velocity, world frame
+    vel_arrow = np.array([vel_world[0], vel_world[1], 0.0]) * vel_scale
+    _add_arrow(mujoco_mod, scene, origin, vel_arrow,
+               rgba=np.array([0.2, 0.4, 1.0, 0.8], dtype=np.float32),
+               radius=0.015)
+
+    # --- 2. Command velocity (red) ---
+    if command_vel_xy is not None:
+        cmd_xy = np.asarray(command_vel_xy, dtype=np.float64)[:2]
+        # Transform from base yaw frame to world frame for display
+        base_quat = data.qpos[3:7].copy()
+        cmd_world = base_yaw_to_world(
+            np.array([cmd_xy[0], cmd_xy[1], 0.0], dtype=np.float64),
+            base_quat,
+        )
+        cmd_arrow = np.array([cmd_world[0], cmd_world[1], 0.0]) * vel_scale
+        _add_arrow(mujoco_mod, scene, origin, cmd_arrow,
+                   rgba=np.array([1.0, 0.2, 0.2, 0.8], dtype=np.float32),
+                   radius=0.015)
+
+    # --- 3. External force (green, thin) ---
+    if external_force_w is not None:
+        force_w = np.asarray(external_force_w, dtype=np.float64)
+        force_arrow = force_w * force_scale
+        force_origin = origin.copy()
+        force_origin[2] += force_arrow_z_extra_offset
+        _add_arrow(mujoco_mod, scene, force_origin, force_arrow,
+                   rgba=np.array([0.2, 0.9, 0.3, 0.9], dtype=np.float32),
+                   radius=0.008)

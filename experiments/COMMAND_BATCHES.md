@@ -403,7 +403,7 @@ CUDA_VISIBLE_DEVICES=0,1 torchrun --nproc_per_node=2 scripts/rsl_rl/train.py --h
 ### Play Command (Auto)
 <!-- RLCM:PLAY_COMMAND_START -->
 ```bash
-PUBLIC_IP=10.13.11.197 LIVESTREAM=1 ENABLE_CAMERAS=1 python scripts/rsl_rl/play.py --task Template-UniFPAliengo-v0 --resume --checkpoint logs/rsl_rl/uniFP_aliengo_position_force/2026-02-28_20-56-35_cfg33/model_19800.pt --num_envs 128 --device cuda:1 \
+PUBLIC_IP=10.13.11.197 LIVESTREAM=1 ENABLE_CAMERAS=1 python scripts/rsl_rl/play.py --task Template-UniFPAliengo-v0 --resume --checkpoint logs/rsl_rl/uniFP_aliengo_position_force/2026-03-17_22-31-52_cfg33-Random-upSpeed/model_19400.pt --num_envs 128 --device cuda:1 \
     env.scene.robot.actuators.hips.stiffness=180.0 \
     env.scene.robot.actuators.hips.damping=4.0 \
     env.scene.robot.actuators.thighs.stiffness=180.0 \

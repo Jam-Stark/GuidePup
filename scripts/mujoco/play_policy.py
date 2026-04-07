@@ -27,6 +27,7 @@ from runtime import (
     resolve_body_id,
     summarize_joint_actuator_gains,
     update_runtime_state_after_step,
+    draw_velocity_arrows,
 )
 
 try:
@@ -169,6 +170,7 @@ def main() -> int:
     def run_control_step() -> None:
         obs = runtime_state.policy_obs()
         action, _ = infer_policy_outputs(policy, obs, action_dim=metadata.action_dim)
+        action = np.clip(action, -metadata.action_clip, metadata.action_clip)
         target_joint_pos = build_target_joint_positions(action, runtime_state, metadata)
         apply_control_targets(data, bindings, target_joint_pos)
 
@@ -204,6 +206,11 @@ def main() -> int:
             configure_tracking_viewer_camera(mujoco, viewer, data, track_body_id=trunk_body_id)
             while viewer.is_running() and data.time < args.duration_s:
                 run_control_step()
+                draw_velocity_arrows(
+                    mujoco, viewer, data,
+                    trunk_body_id=trunk_body_id,
+                    command_vel_xy=locomotion_cmd[:2],
+                )
                 viewer.sync()
 
     return 0

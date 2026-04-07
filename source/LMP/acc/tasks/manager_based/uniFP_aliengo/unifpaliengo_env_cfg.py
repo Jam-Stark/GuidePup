@@ -113,7 +113,7 @@ class CommandsCfg:
         class Ranges:
             """Ranges for the commands."""
 
-            lin_vel_x: Tuple[float, float] = (-1.0, 1.0)
+            lin_vel_x: Tuple[float, float] = (0.8, 0.8)
             lin_vel_y: Tuple[float, float] = (-0.5, 0.5)
             ang_vel_z: Tuple[float, float] = (-1.0, 1.0)
             heading: Tuple[float, float] = (-math.pi, math.pi)

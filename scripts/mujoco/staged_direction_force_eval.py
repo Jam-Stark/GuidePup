@@ -23,6 +23,7 @@ from runtime import (
     configure_tracking_viewer_camera,
     create_model_bindings,
     default_staged_eval_metadata,
+    draw_velocity_arrows,
     finite_or_nan,
     format_optional,
     infer_policy_outputs,
@@ -304,7 +305,7 @@ def main() -> int:
         control_dt=metadata.control_dt,
         steady_target_sphere=metadata.default_ee_sphere_cmd,
     )
-    initial_ee_sphere_cmd = np.zeros(3, dtype=np.float32)
+    initial_ee_sphere_cmd = ee_command_schedule.current_sphere_command()
     initial_command_obs = build_command_vector(
         locomotion_cmd=locomotion_cmd,
         ee_sphere_cmd=initial_ee_sphere_cmd,
@@ -434,6 +435,7 @@ def main() -> int:
 
         obs = runtime_state.policy_obs()
         action, pred_est = infer_policy_outputs(policy, obs, action_dim=metadata.action_dim)
+        action = np.clip(action, -metadata.action_clip, metadata.action_clip)
         if pred_est is None:
             raise RuntimeError(
                 "The staged evaluator requires a MuJoCo export that returns (action, pred_est). "
@@ -535,13 +537,25 @@ def main() -> int:
                 print("MuJoCo viewer is unavailable in this environment. Re-run with --headless.", file=sys.stderr)
                 return 3
             with mujoco_viewer.launch_passive(model, data) as viewer:
-                configure_tracking_viewer_camera(mujoco, viewer, data, track_body_id=trunk_body_id)
+                with viewer.lock():
+                    configure_tracking_viewer_camera(mujoco, viewer, data, track_body_id=trunk_body_id)
+                viewer.sync()
                 for step in range(max_steps):
                     if not viewer.is_running():
                         ended_early = True
                         end_step = step
                         break
                     run_one_control_step(step, writer)
+                    # Rebuild custom user_scn geoms before sync so MuJoCo incorporates them this frame.
+                    draw_velocity_arrows(
+                        mujoco,
+                        viewer,
+                        data,
+                        trunk_body_id=trunk_body_id,
+                        command_vel_xy=locomotion_cmd[:2],
+                        external_force_w=data.xfrc_applied[trunk_body_id, :3],
+                        force_arrow_z_extra_offset=0.05,
+                    )
                     viewer.sync()
                 else:
                     end_step = max_steps
