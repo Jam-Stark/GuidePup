@@ -13,9 +13,9 @@ from acc.algorithms.rsl_rl import RslRlPpoActorCriticCfg
 class CustomPpoActorCriticCfg(RslRlPpoActorCriticCfg):
     class_name: str = "AsymmetricActorCritic"
     latent_dim: int = 64
-    prediction_dim: int = 12
+    prediction_dim: int = 6
     history_num_frames: int = 32
-    obs_curr_dim: int = 73
+    obs_curr_dim: int = 46
     policy_history_only: bool = True
     history_encoder_hidden_dims: list[int] = [512, 256, 128]
     state_estimator_hidden_dims: list[int] = [128, 64]
@@ -26,7 +26,7 @@ class CustomPpoAlgorithmCfg(RslRlPpoAlgorithmCfg):
     class_name: str = "PPOAdaptation"
     adaptation_coef: float = 1.0
     adaptation_learning_rate: float = 1e-5
-    obs_pred_weights: list[float] = [0.2] * 3 + [0.2] * 3 + [1.0] * 3 + [1.0] * 3
+    obs_pred_weights: list[float] = [0.2] * 3 + [1.0] * 3
     obs_pred_target_obs_group: str = "pred"
     obs_pred_target_key: str | None = None
 

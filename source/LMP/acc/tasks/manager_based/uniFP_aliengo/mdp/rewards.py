@@ -190,8 +190,7 @@ def tracking_lin_vel_force_world(
     env: ManagerBasedRLEnv,
     locomotion_command_name: str = "locomotion_commands",
     base_force_ext_name: str = "base_force_ext",
-    base_force_cmd_name: str = "base_force_command",
-    base_impedance_command_name: str = "base_impedance_command",
+    base_force_kd: float = 100.0,
     tracking_sigma: float = 0.25,
 ) -> torch.Tensor:
 
@@ -199,21 +198,7 @@ def tracking_lin_vel_force_world(
 
     base_force_ext_w = env.command_manager.get_command(base_force_ext_name)
     base_force_ext_xy = world_to_base_yaw(base_force_ext_w, base_yaw_quat)[:, :2]
-    base_force_cmd = env.command_manager.get_command(base_force_cmd_name)
-    base_force_cmd_xy = torch.zeros((env.num_envs, 2), device=env.device)
-    if base_force_cmd.shape[1] >= 2:
-        base_force_cmd_xy[:, :2] = base_force_cmd[:, :2]
-    elif base_force_cmd.shape[1] == 1:
-        base_force_cmd_xy[:, 0] = base_force_cmd[:, 0]
-
-    forces_offset_xy = base_force_ext_xy + base_force_cmd_xy
-
-    base_impedance_cmd = env.command_manager.get_command(base_impedance_command_name)
-    if base_impedance_cmd.shape[1] >= 2:
-        base_kd = base_impedance_cmd[:, 1]
-    else:
-        base_kd = torch.ones(env.num_envs, device=env.device)
-    base_kd = torch.clamp(base_kd, min=1e-6)
+    base_kd = max(float(base_force_kd), 1e-6)
 
     locomotion_cmd = env.command_manager.get_command(locomotion_command_name)
     base_lin_vel_cmd_xy = torch.zeros((env.num_envs, 2), device=env.device)
@@ -222,7 +207,7 @@ def tracking_lin_vel_force_world(
     elif locomotion_cmd.shape[1] == 1:
         base_lin_vel_cmd_xy[:, 0] = locomotion_cmd[:, 0]
 
-    base_lin_vel_offset_xy = forces_offset_xy / base_kd.unsqueeze(-1) + base_lin_vel_cmd_xy
+    base_lin_vel_offset_xy = base_force_ext_xy / base_kd + base_lin_vel_cmd_xy
 
     try:
         locomotion_term = env.command_manager.get_term(locomotion_command_name)

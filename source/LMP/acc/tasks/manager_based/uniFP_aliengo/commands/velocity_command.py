@@ -29,8 +29,7 @@ class ExtendedUniformVelocityCommandCfg(UniformVelocityCommandCfg):
     lin_vel_x_clip: float = 0.0
     lin_vel_y_clip: float = 0.0
     base_force_ext_name: str = "base_force_ext"
-    base_force_command_name: str = "base_force_command"
-    base_impedance_command_name: str = "base_impedance_command"
+    base_force_kd: float = 100.0
     debug_vis_speed_ref: float = 0.5
     debug_vis_min_scale: float = 0.15
     debug_vis_max_scale: float = 2.0
@@ -95,8 +94,6 @@ class ExtendedUniformVelocityCommand(UniformVelocityCommand):
         super()._update_metrics()
         try:
             base_force_ext_w = self._env.command_manager.get_command(self.cfg.base_force_ext_name)
-            base_force_cmd_l = self._env.command_manager.get_command(self.cfg.base_force_command_name)
-            base_impedance_cmd = self._env.command_manager.get_command(self.cfg.base_impedance_command_name)
         except KeyError:
             return
 
@@ -105,17 +102,11 @@ class ExtendedUniformVelocityCommand(UniformVelocityCommand):
 
         base_yaw_quat = get_base_yaw_quat(self._env)
         base_force_ext_l = world_to_base_yaw(base_force_ext_w, base_yaw_quat)
-        forces_offset = base_force_ext_l + base_force_cmd_l
+        base_kd = max(float(self.cfg.base_force_kd), 1e-6)
 
-        if base_impedance_cmd.shape[1] >= 2:
-            base_kd = base_impedance_cmd[:, 1]
-        else:
-            base_kd = torch.ones(self.num_envs, device=self.device)
-        base_kd = torch.clamp(base_kd, min=1e-6)
-
-        base_lin_vel_cmd = torch.zeros_like(forces_offset)
+        base_lin_vel_cmd = torch.zeros_like(base_force_ext_l)
         base_lin_vel_cmd[:, :2] = self.vel_command_b[:, :2]
-        base_lin_vel_offset = forces_offset / base_kd.unsqueeze(-1) + base_lin_vel_cmd
+        base_lin_vel_offset = base_force_ext_l / base_kd + base_lin_vel_cmd
 
         base_lin_vel_w = quat_apply(self.robot.data.root_quat_w, self.robot.data.root_lin_vel_b)
         base_lin_vel_yaw = world_to_base_yaw(base_lin_vel_w, base_yaw_quat)
@@ -246,18 +237,10 @@ class ExtendedUniformVelocityCommand(UniformVelocityCommand):
         base_yaw_quat = None
         if hasattr(self, "_env") and hasattr(self._env, "command_manager"):
             base_yaw_quat = get_base_yaw_quat(self._env)
-            base_force_ext_w = self._env.command_manager.get_command("base_force_ext")
+            base_force_ext_w = self._env.command_manager.get_command(self.cfg.base_force_ext_name)
             base_force_ext_l = world_to_base_yaw(base_force_ext_w, base_yaw_quat)
-            base_force_cmd_l = self._env.command_manager.get_command("base_force_command")
-            forces_offset = base_force_ext_l + base_force_cmd_l
-
-            base_impedance_cmd = self._env.command_manager.get_command("base_impedance_command")
-            if base_impedance_cmd.shape[1] >= 2:
-                base_kd = base_impedance_cmd[:, 1]
-            else:
-                base_kd = torch.ones(self.num_envs, device=self.device)
-            base_kd = torch.clamp(base_kd, min=1e-6)
-            base_lin_vel_offset = forces_offset / base_kd.unsqueeze(-1) + base_lin_vel_offset
+            base_kd = max(float(self.cfg.base_force_kd), 1e-6)
+            base_lin_vel_offset = base_force_ext_l / base_kd + base_lin_vel_offset
 
         if base_yaw_quat is None:
             base_yaw_quat = get_base_yaw_quat(self._env)

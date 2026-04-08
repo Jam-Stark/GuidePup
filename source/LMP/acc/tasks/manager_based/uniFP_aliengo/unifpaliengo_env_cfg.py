@@ -60,6 +60,7 @@ GRIPPER_EXT_FULL_RANGE = (0.0, 0.0)  # gripper力的完整范围
 GRIPPER_CMD_FULL_RANGE = (0.0, 0.0)  # gripper命令的完整范围
 BASE_EXT_FULL_RANGE = (-30.0, 30.0)  # base力的完整范围
 BASE_CMD_FULL_RANGE = (-30.0, 30.0)  # base命令的完整范围
+BASE_FORCE_KD = 100.0
 POLICY_OBS_DELAY_RANGE_STEPS = (0, 2)  # policy观测延迟范围（env steps）
 LEG_ACTION_DELAY_RANGE_STEPS = (0, 1)  # 腿部动作延迟范围（env steps）
 
@@ -97,8 +98,7 @@ class CommandsCfg:
         lin_vel_x_clip: float = 0.1
         lin_vel_y_clip: float = 0.1
         base_force_ext_name: str = "base_force_ext"
-        base_force_command_name: str = "base_force_command"
-        base_impedance_command_name: str = "base_impedance_command"
+        base_force_kd: float = BASE_FORCE_KD
         debug_vis_speed_ref: float = 0.3
         debug_vis_min_scale: float = 1.2
         debug_vis_max_scale: float = 3.0
@@ -264,9 +264,9 @@ class CommandsCfg:
 
     locomotion_commands: LocomotionCommandCfg = LocomotionCommandCfg()
     gait_phase: GaitPhaseCfg = GaitPhaseCfg()
-    target_position_commands: TargetPositionCommandCfg = TargetPositionCommandCfg()
-    gripper_impedance_command: GripperImpedanceCommandCfg = GripperImpedanceCommandCfg()
-    base_impedance_command: BaseImpedanceCommandCfg = BaseImpedanceCommandCfg()
+    target_position_commands = None
+    gripper_impedance_command = None
+    base_impedance_command = None
     leg_torque_metrics: LegTorqueMetricsCommandCfg = LegTorqueMetricsCommandCfg()
     feet_contact_force_metrics: FeetContactForceMetricsCommandCfg = FeetContactForceMetricsCommandCfg()
     action_distribution_metrics: ActionDistributionMetricsCommandCfg = ActionDistributionMetricsCommandCfg()
@@ -315,10 +315,10 @@ class CommandsCfg:
 
         force_z_scale: float = 0.0
 
-    gripper_force_ext: GripperForceExtCfg = GripperForceExtCfg()
+    gripper_force_ext = None
     base_force_ext: BaseForceExtCfg = BaseForceExtCfg()
-    gripper_force_command: GripperForceCommandCfg = GripperForceCommandCfg()
-    base_force_command: BaseForceCommandCfg = BaseForceCommandCfg()
+    gripper_force_command = None
+    base_force_command = None
 
 
 ##
@@ -588,23 +588,12 @@ class ActionsCfg:
         min_delay_steps=LEG_ACTION_DELAY_RANGE_STEPS[0],
         max_delay_steps=LEG_ACTION_DELAY_RANGE_STEPS[1],
     )
-    arm_actions = mdp.JointPositionActionCfg(
+    arm_actions = mdp.FixedJointPositionActionCfg(
         asset_name="robot",
-        joint_names=["arm_joint1", "arm_joint2", "arm_joint3", "arm_joint4", "arm_joint5"],
-        scale=0.25,
-        use_default_offset=True,
-        clip={".*": (-100.0, 100.0)}
+        joint_names=[
+            "arm_joint1", "arm_joint2", "arm_joint3", "arm_joint4", "arm_joint5", "arm_joint6"
+        ],
     )
-    """fixed_wrist_gripper = mdp.FixedJointPositionActionCfg(
-        asset_name="robot",
-        joint_names=["arm_joint6"],
-    )"""
-
-    """gripper_force_ext = mdp.ApplyForceCommandActionCfg(
-        asset_name="robot",
-        body_name="gripperMover",
-        command_name="gripper_force_ext",
-    )"""
     base_force_ext = mdp.ApplyForceCommandActionCfg(
         asset_name="robot",
         body_name="base",
@@ -662,15 +651,14 @@ class ObservationsCfg:
             scale=0.25,
             clip=(-100.0, 100.0)
         )
-        # 3. 关节位置 (17维) - 当前位置相对默认位置的偏移，排除夹爪关节
+        # 3. 腿部关节位置 (12维)
         dof_pos = ObsTerm(
             func=mdp.joint_pos_rel,
             params={"asset_cfg": SceneEntityCfg("robot", joint_names=[
                 "FL_hip_joint", "FR_hip_joint", "RL_hip_joint", "RR_hip_joint",
                 "FL_thigh_joint", "FR_thigh_joint", "RL_thigh_joint",
                 "RR_thigh_joint", "FL_calf_joint", "FR_calf_joint",
-                "RL_calf_joint", "RR_calf_joint", "arm_joint1", "arm_joint2",
-                "arm_joint3", "arm_joint4", "arm_joint5"
+                "RL_calf_joint", "RR_calf_joint"
             ])},
             modifiers=[make_policy_obs_delay_modifier_cfg()],
             noise=GaussianNoiseCfg(mean=0.0, std=0.01, operation="add"),
@@ -678,7 +666,7 @@ class ObservationsCfg:
             clip=(-100.0, 100.0)
         )
         
-        # 4. 关节速度 (17维) - 排除夹爪关节
+        # 4. 腿部关节速度 (12维)
         joint_vel = ObsTerm(
             func=mdp.joint_vel_rel,
             params={
@@ -686,8 +674,7 @@ class ObservationsCfg:
                     "FL_hip_joint", "FR_hip_joint", "RL_hip_joint", "RR_hip_joint",
                     "FL_thigh_joint", "FR_thigh_joint", "RL_thigh_joint",
                     "RR_thigh_joint", "FL_calf_joint", "FR_calf_joint",
-                    "RL_calf_joint", "RR_calf_joint", "arm_joint1", "arm_joint2",
-                    "arm_joint3", "arm_joint4", "arm_joint5"
+                    "RL_calf_joint", "RR_calf_joint"
                 ])},
             modifiers=[make_policy_obs_delay_modifier_cfg()],
             noise=GaussianNoiseCfg(mean=0.0, std=1.5, operation="add"),
@@ -695,7 +682,7 @@ class ObservationsCfg:
             clip=(-100.0, 100.0)
         )
 
-        # 5. 上一时刻的动作 (17维)
+        # 5. 上一时刻的动作 (12维)
         last_action = ObsTerm(func=mdp.last_action,
                               clip=(-100.0, 100.0))
         # 6. 步态时钟信号 (2维) - 全局时钟正弦余弦
@@ -703,38 +690,10 @@ class ObservationsCfg:
             func=mdp.gait_clock_signal,
             clip=(-100.0, 100.0)
         )
-        # 7. 指令 (15维) - 给定的机器人运动指令
-        """commands:
-            Base Velocity Commands) - [3维]
-                Index 0: Base Linear Velocity X
-                Index 1: Base Linear Velocity Y
-                Index 2: Base Angular Velocity Yaw
-            End-Effector Position Commands - Spherical - [3维]
-                Index 3: EE Spherical Radius
-                Index 4: EE Spherical Pitch
-                Index 5: EE Spherical Yaw
-            End-Effector Orientation Commands - [3维]
-                Index 6: EE Roll
-                Index 7: EE Pitch
-                Index 8: EE Yaw
-            End-Effector Force Commands - [3维]
-                Index 9: EE Force X
-                Index 10: EE Force Y
-                Index 11: EE Force Z
-            Base Force Commands - [3维]
-                Index 12: Base Force X
-                Index 13: Base Force Y
-                Index 14: Base Force Z
-        """
+        # 7. locomotion 指令 (3维)
         commands = ObsTerm(
-            func=mdp.all_commands_with_scales,
-            params={"scales": (
-                2.0, 2.0, 0.25,  # Base Velocity
-                0.5, 1.0, 1.3,   # EE Sphere Pos
-                0.5, 0.5, 0.5,   # EE Orientation
-                0.01, 0.01, 0.01,  # EE Force
-                0.01, 0.01, 0.01  # Base Force
-            )},
+            func=mdp.locomotion_commands_with_scales,
+            params={"scales": (2.0, 2.0, 0.25)},
             clip=(-100.0, 100.0)
         )
 
@@ -777,20 +736,9 @@ class ObservationsCfg:
             clip=(-100.0, 100.0)
         )
         
-        # 2. 机械臂末端执行器球坐标位置 (3维)   base坐标系下
-        ee_pos = ObsTerm(
-            func=mdp.ee_pos_in_sphere,
-            scale=(0.5, 1.0, 1.3),
-            clip=(-100.0, 100.0)
-        )
+        ee_pos = None
 
-        # 3. 夹爪受力 (3维)
-        gripper_forces_local = ObsTerm(
-            func=mdp.gripper_forces_local,
-            params={"command_name": "gripper_force_ext"},
-            scale=0.01,
-            clip=(-100.0, 100.0)
-        )
+        gripper_forces_local = None
         # 4. 基座受力 (3维)
         base_forces_local = ObsTerm(
             func=mdp.base_forces_local,
@@ -859,21 +807,20 @@ class ObservationsCfg:
             params={"asset_cfg": SceneEntityCfg("robot")},
             clip=(-100.0, 100.0)
         )
-        # 13. 关节位置 (17维) - 当前位置相对默认位置的偏移
+        # 13. 腿部关节位置 (12维)
         dof_pos = ObsTerm(
             func=mdp.joint_pos_rel,
             params={"asset_cfg": SceneEntityCfg("robot", joint_names=[
                 "FL_hip_joint", "FR_hip_joint", "RL_hip_joint", "RR_hip_joint",
                 "FL_thigh_joint", "FR_thigh_joint", "RL_thigh_joint",
                 "RR_thigh_joint", "FL_calf_joint", "FR_calf_joint",
-                "RL_calf_joint", "RR_calf_joint", "arm_joint1", "arm_joint2",
-                "arm_joint3", "arm_joint4", "arm_joint5"
+                "RL_calf_joint", "RR_calf_joint"
             ])},
             scale=1.0,
             clip=(-100.0, 100.0)
         )
         
-        # 14. 关节速度 (17维) - 排除夹爪关节
+        # 14. 腿部关节速度 (12维)
         joint_vel = ObsTerm(
             func=mdp.joint_vel_rel,
             params={
@@ -881,8 +828,7 @@ class ObservationsCfg:
                     "FL_hip_joint", "FR_hip_joint", "RL_hip_joint", "RR_hip_joint",
                     "FL_thigh_joint", "FR_thigh_joint", "RL_thigh_joint",
                     "RR_thigh_joint", "FL_calf_joint", "FR_calf_joint",
-                    "RL_calf_joint", "RR_calf_joint", "arm_joint1", "arm_joint2",
-                    "arm_joint3", "arm_joint4", "arm_joint5"
+                    "RL_calf_joint", "RR_calf_joint"
                 ])},
             scale=0.05,
             clip=(-100.0, 100.0)
@@ -900,16 +846,10 @@ class ObservationsCfg:
             clip=(-100.0, 100.0)
         )
 
-        # 17. 指令 (15维) - 给定的机器人运动指令
+        # 17. locomotion 指令 (3维)
         commands = ObsTerm(
-            func=mdp.all_commands_with_scales,
-            params={"scales": (
-                2.0, 2.0, 0.25,  # Base Velocity
-                0.5, 1.0, 1.3,   # EE goal Sphere Pos
-                0.5, 0.5, 0.5,   # EE goal Orientation
-                0.01, 0.01, 0.01,  # EE Force
-                0.01, 0.01, 0.01  # Base Force
-            )},
+            func=mdp.locomotion_commands_with_scales,
+            params={"scales": (2.0, 2.0, 0.25)},
             clip=(-100.0, 100.0)
         )
 
@@ -919,23 +859,11 @@ class ObservationsCfg:
             params={
                 "locomotion_command_name": "locomotion_commands",
                 "base_force_ext_name": "base_force_ext",
-                "base_force_cmd_name": "base_force_command",
-                "base_impedance_command_name": "base_impedance_command"
+                "base_force_kd": BASE_FORCE_KD,
             },
             scale=2.0,
             clip=(-100.0, 100.0)
         )
-
-        """# 18.   末端目标 with force offset (3维)
-        ee_goal_offset = ObsTerm(
-            func=mdp.ee_goal_offset_local_sphere,
-            params={"ee_goal_command_name": "target_position_commands",
-                    "gripper_force_ext_name": "gripper_force_ext",
-                    "gripper_force_command_name": "gripper_force_command",
-                    "gripper_impedance_command_name": "gripper_impedance_command"},
-            scale=(0.5, 1.0, 1.3),
-            clip=(-100.0, 100.0)
-        )"""
         
         def __post_init__(self) -> None:
             self.enable_corruption = False
@@ -959,20 +887,8 @@ class ObservationsCfg:
             clip=(-100.0, 100.0)
         )
         
-        # 2. 机械臂末端执行器球坐标位置 (3维)   base坐标系下
-        ee_goal_pos = ObsTerm(
-            func=mdp.ee_pos_in_sphere,
-            scale=(0.5, 1.0, 1.3),
-            clip=(-100.0, 100.0)
-        )
-
-        # 3. 夹爪受力 (3维)
-        gripper_forces_local = ObsTerm(
-            func=mdp.gripper_forces_local,
-            params={"command_name": "gripper_force_ext", "use_applied": True},
-            scale=0.01,
-            clip=(-100.0, 100.0)
-        )
+        ee_goal_pos = None
+        gripper_forces_local = None
         # 4. 基座受力 (3维)
         base_forces_local = ObsTerm(
             func=mdp.base_forces_local,
@@ -1046,19 +962,7 @@ class CurriculumCfg:
     )"""
 
     # First force_start_iterations iterations: disable force cmd/ext, then restore ranges.
-    gripper_force_ext_curriculum = CurriculumTermCfg(
-        func=mdp.modify_term_cfg,
-        params={
-            "address": "commands.gripper_force_ext.force_range",
-            "modify_fn": modify_force_range,
-            "modify_params": {
-                "zero_range": (0.0, 0.0),
-                "full_range": GRIPPER_EXT_FULL_RANGE,
-                "start_steps": FORCE_COMMAND_START_STEPS,
-                "resume_steps": FORCE_COMMAND_RESUME_STEPS,
-            },
-        },
-    )
+    gripper_force_ext_curriculum = None
 
     base_force_ext_curriculum = CurriculumTermCfg(
         func=mdp.modify_term_cfg,
@@ -1074,33 +978,8 @@ class CurriculumCfg:
         },
     )
 
-    gripper_force_command_curriculum = CurriculumTermCfg(
-        func=mdp.modify_term_cfg,
-        params={
-            "address": "commands.gripper_force_command.force_range",
-            "modify_fn": modify_force_range,
-            "modify_params": {
-                "zero_range": (0.0, 0.0),
-                "full_range": GRIPPER_CMD_FULL_RANGE,
-                "start_steps": FORCE_COMMAND_START_STEPS,
-                "resume_steps": FORCE_COMMAND_RESUME_STEPS,
-            },
-        },
-    )
-
-    base_force_command_curriculum = CurriculumTermCfg(
-        func=mdp.modify_term_cfg,
-        params={
-            "address": "commands.base_force_command.force_range",
-            "modify_fn": modify_force_range,
-            "modify_params": {
-                "zero_range": (0.0, 0.0),
-                "full_range": BASE_CMD_FULL_RANGE,
-                "start_steps": FORCE_COMMAND_START_STEPS,
-                "resume_steps": FORCE_COMMAND_RESUME_STEPS,
-            },
-        },
-    )
+    gripper_force_command_curriculum = None
+    base_force_command_curriculum = None
 
 
 @configclass
@@ -1146,7 +1025,7 @@ class EventCfg:
                 "FL_hip_joint", "FR_hip_joint", "RL_hip_joint", "RR_hip_joint",
                 "FL_thigh_joint", "FR_thigh_joint", "RL_thigh_joint", "RR_thigh_joint",
                 "FL_calf_joint", "FR_calf_joint", "RL_calf_joint", "RR_calf_joint",
-                "arm_joint1", "arm_joint2", "arm_joint3", "arm_joint4", "arm_joint5"
+                "arm_joint1", "arm_joint2", "arm_joint3", "arm_joint4", "arm_joint5", "arm_joint6"
             ]),
         },
     )
@@ -1186,19 +1065,7 @@ class EventCfg:
 
     
     # 3. 机械臂关节刚度和阻尼随机化
-    randomize_arm_joint_gains = EventTerm(
-        func=mdp.my_randomize_actuator_gains,
-        mode="reset",
-        params={
-            "asset_cfg": SceneEntityCfg("robot", joint_names=[
-                "arm_joint1", "arm_joint2", "arm_joint3", "arm_joint4", "arm_joint5"
-            ]),
-            "stiffness_distribution_params": (0.9, 1.1),
-            "damping_distribution_params": (0.9, 1.1),
-            "operation": "scale",
-            "distribution": "uniform",
-        },
-    )
+    randomize_arm_joint_gains = None
     
     # ========== 启动时随机化事件 (startup mode) ==========
     
@@ -1307,8 +1174,7 @@ class RewardsCfg:
         params={
             "locomotion_command_name": "locomotion_commands",
             "base_force_ext_name": "base_force_ext",
-            "base_force_cmd_name": "base_force_command",
-            "base_impedance_command_name": "base_impedance_command",
+            "base_force_kd": BASE_FORCE_KD,
             "tracking_sigma": 0.25,
         },
     )
@@ -1392,22 +1258,8 @@ class RewardsCfg:
             "FL_calf_joint", "FR_calf_joint", "RL_calf_joint", "RR_calf_joint"
         ])}
     )
-    dof_acc_arm = RewTerm(
-        func=mdp.joint_acc_l2,
-        weight=-4.5e-7,
-        params={"asset_cfg": SceneEntityCfg("robot", joint_names=[
-            "arm_joint1", "arm_joint2", "arm_joint3",
-            "arm_joint4", "arm_joint5"
-        ])}
-    )
-    dof_vel_arm = RewTerm(
-        func=mdp.joint_vel_l2,
-        weight=-2.0e-4,
-        params={"asset_cfg": SceneEntityCfg("robot", joint_names=[
-            "arm_joint1", "arm_joint2", "arm_joint3",
-            "arm_joint4", "arm_joint5"
-        ])}
-    )
+    dof_acc_arm = None
+    dof_vel_arm = None
     collision_penalty = RewTerm(
         func=mdp.undesired_contacts,
         weight=-5.0,
@@ -1418,11 +1270,7 @@ class RewardsCfg:
         weight=-0.02,
         params={"action_term_name": "leg_actions"}
     )
-    action_rate_arm = RewTerm(
-        func=mdp.joint_processed_action_rate_l2,
-        weight=-0.045,
-        params={"action_term_name": "arm_actions"}
-    )
+    action_rate_arm = None
     dof_pos_limit = RewTerm(
         func=mdp.joint_pos_limits,
         weight=-10.0,
@@ -1439,8 +1287,6 @@ class RewardsCfg:
             "FL_hip_joint", "FR_hip_joint", "RL_hip_joint", "RR_hip_joint",
             "FL_thigh_joint", "FR_thigh_joint", "RL_thigh_joint", "RR_thigh_joint",
             "FL_calf_joint", "FR_calf_joint", "RL_calf_joint", "RR_calf_joint",
-            "arm_joint1", "arm_joint2", "arm_joint3",
-            "arm_joint4", "arm_joint5",
         ]),
             "soft_limit": 0.9
         }
@@ -1483,18 +1329,7 @@ class RewardsCfg:
         weight=-15.0,
         params={"asset_cfg": SceneEntityCfg("robot"), "height_threshold": 0.15}
     )
-    tracking_ee_force_world = RewTerm(
-        func=mdp.tracking_ee_force_world,
-        weight=2.0,
-        params={
-            "command_name": "target_position_commands",
-            "gripper_cfg": SceneEntityCfg("robot", body_names="gripperMover"),
-            "force_command_name": "gripper_force_ext",
-            "gripper_force_command_name": "gripper_force_command",
-            "gripper_impedance_command_name": "gripper_impedance_command",
-            "tracking_ee_sigma": 1.0,
-        },
-    )
+    tracking_ee_force_world = None
 
 
 @configclass

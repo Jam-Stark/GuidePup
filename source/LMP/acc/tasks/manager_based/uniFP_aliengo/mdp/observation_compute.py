@@ -49,9 +49,6 @@ def _record_gait_command_name(output: torch.Tensor, descriptor, **kwargs) -> Non
 def _record_command_aggregate_metadata(output: torch.Tensor, descriptor, **kwargs) -> None:
     descriptor.command_term_names = {
         "locomotion": kwargs.get("locomotion_command_name", "locomotion_commands"),
-        "target_position": kwargs.get("target_position_command_name", "target_position_commands"),
-        "gripper_force": kwargs.get("gripper_force_command_name", "gripper_force_command"),
-        "base_force": kwargs.get("base_force_command_name", "base_force_command"),
     }
     descriptor.command_scales = _to_descriptor_list(kwargs.get("scales"))
 
@@ -557,53 +554,26 @@ def ref_dof_pos_error(env: ManagerBasedRLEnv, gait_command_name: str, target_joi
         "base_lin_vel_x",
         "base_lin_vel_y",
         "base_ang_vel_z",
-        "ee_sphere_radius",
-        "ee_sphere_pitch",
-        "ee_sphere_yaw",
-        "ee_orient_roll",
-        "ee_orient_pitch",
-        "ee_orient_yaw",
-        "gripper_force_x",
-        "gripper_force_y",
-        "gripper_force_z",
-        "base_force_x",
-        "base_force_y",
-        "base_force_z",
     ],
     on_inspect=[record_shape, record_dtype, _record_command_aggregate_metadata],
 )
-def all_commands_with_scales(
+def locomotion_commands_with_scales(
     env: ManagerBasedRLEnv,
     scales: Sequence[float] | torch.Tensor,
     locomotion_command_name: str = "locomotion_commands",
-    target_position_command_name: str = "target_position_commands",
-    gripper_force_command_name: str = "gripper_force_command",
-    base_force_command_name: str = "base_force_command",
 ) -> torch.Tensor:
-    """Aggregate commands; EE goal is spherical in a yaw-only, sphere-centered frame."""
+    """Return scaled locomotion commands only."""
     locomotion_cmd = env.command_manager.get_command(locomotion_command_name)
     locomotion_cmd = locomotion_cmd[:, :3] if locomotion_cmd.shape[1] >= 3 else torch.nn.functional.pad(
         locomotion_cmd, (0, 3 - locomotion_cmd.shape[1])
     )
 
-    target_cmd = env.command_manager.get_command(target_position_command_name)
-    target_pos_sphere = target_cmd[:, :3] if target_cmd.shape[1] >= 3 else torch.nn.functional.pad(
-        target_cmd, (0, 3 - target_cmd.shape[1])
-    )
-
-    ee_orient = torch.zeros((env.num_envs, 3), device=env.device)
-
-    gripper_force_cmd = env.command_manager.get_command(gripper_force_command_name)
-    base_force_cmd = env.command_manager.get_command(base_force_command_name)
-
-    cmds = torch.cat((locomotion_cmd, target_pos_sphere, ee_orient, gripper_force_cmd, base_force_cmd), dim=1)
-
     if isinstance(scales, (tuple, list)):
         scales = torch.tensor(scales, device=env.device)
     elif isinstance(scales, torch.Tensor):
         scales = scales.to(env.device)
-    
-    return cmds * scales
+
+    return locomotion_cmd * scales
 
 
 def ee_goal_offset_local_sphere(
@@ -658,57 +628,20 @@ def base_lin_vel_offset(
     env: ManagerBasedRLEnv,
     locomotion_command_name: str = "locomotion_commands",
     base_force_ext_name: str = "base_force_ext",
-    base_force_cmd_name: str = "base_force_command",
-    base_impedance_command_name: str = "base_impedance_command",
+    base_force_kd: float = 100.0,
 ) -> torch.Tensor:
-    """Computes effective base XY linear velocity command including force offsets.
-    
-    The offset is calculated as: velocity_cmd + (F_ext + F_cmd) / Kd
-    Only x/y directions are used. All calculations are performed in the
-    base yaw-aligned frame.
-    
-    Returns:
-        Tensor of shape (num_envs, 2) representing target XY linear velocity
-        with force offsets.
-    """
+    """Compute the force-modulated base XY velocity target in the base yaw frame."""
     base_yaw_quat = get_base_yaw_quat(env)
 
-    # 1. Get external forces (world -> base yaw frame), keep XY only.
     base_force_ext_w = env.command_manager.get_command(base_force_ext_name)
     base_force_ext_xy = world_to_base_yaw(base_force_ext_w, base_yaw_quat)[:, :2]
-    
-    # 2. Get commanded forces (assumed local frame), keep XY only.
-    base_force_cmd = env.command_manager.get_command(base_force_cmd_name)
-    base_force_cmd_xy = torch.zeros((env.num_envs, 2), device=env.device)
-    if base_force_cmd.shape[1] >= 2:
-        base_force_cmd_xy[:, :2] = base_force_cmd[:, :2]
-    elif base_force_cmd.shape[1] == 1:
-        base_force_cmd_xy[:, 0] = base_force_cmd[:, 0]
+    base_kd = max(float(base_force_kd), 1e-6)
 
-    forces_total_xy = base_force_ext_xy + base_force_cmd_xy
-
-    # 3. Get impedance params (Kd is index 1)
-    base_impedance_cmd = env.command_manager.get_command(base_impedance_command_name)
-    if base_impedance_cmd.shape[1] >= 2:
-        base_kd = base_impedance_cmd[:, 1]
-    else:
-        # Default fallback if dimension is missing
-        base_kd = torch.ones(env.num_envs, device=env.device)
-    
-    # Avoid division by zero
-    base_kd = torch.clamp(base_kd, min=1e-6)
-
-    # 4. Get base XY velocity command
     locomotion_cmd = env.command_manager.get_command(locomotion_command_name)
     base_lin_vel_cmd_xy = torch.zeros((env.num_envs, 2), device=env.device)
-    
-    # Handle different command dimensions (x only, xy, or xyz).
     if locomotion_cmd.shape[1] >= 2:
         base_lin_vel_cmd_xy[:, :2] = locomotion_cmd[:, :2]
     elif locomotion_cmd.shape[1] == 1:
         base_lin_vel_cmd_xy[:, 0] = locomotion_cmd[:, 0]
 
-    # 5. Calculate effective XY velocity: v_eff_xy = v_cmd_xy + F_xy / Kd
-    base_lin_vel_offset_xy = base_lin_vel_cmd_xy + forces_total_xy / base_kd.unsqueeze(-1)
-
-    return base_lin_vel_offset_xy
+    return base_lin_vel_cmd_xy + base_force_ext_xy / base_kd
