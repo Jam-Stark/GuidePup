@@ -23,6 +23,8 @@ from isaaclab.app import AppLauncher
 
 EPISODE_LENGTH_S = 60.0
 LONG_RESAMPLING_S = 1.0e9
+FORCE_INTERP_LINEAR = "linear"
+FORCE_INTERP_QUADRATIC = "quadratic"
 
 DIR_NONE = "none"
 DIR_FORWARD = "forward"
@@ -42,6 +44,7 @@ class StageSegment:
     force_start_n: float = 0.0
     force_end_n: float = 0.0
     capture_axis: bool = False
+    force_interp: str = FORCE_INTERP_LINEAR
 
     @property
     def is_active(self) -> bool:
@@ -54,28 +57,66 @@ class StageSegment:
             return float(self.force_end_n)
         ratio = (float(time_s) - self.start_s) / (self.end_s - self.start_s)
         ratio = max(0.0, min(ratio, 1.0))
+        if self.force_interp == FORCE_INTERP_QUADRATIC:
+            ratio = ratio * ratio
         return float(self.force_start_n + ratio * (self.force_end_n - self.force_start_n))
 
 
 STAGE_SEGMENTS = (
     StageSegment("idle_0", DIR_NONE, "idle", 0.0, 5.0),
-    StageSegment("forward_low", DIR_FORWARD, "low", 5.0, 8.0, 10.0, 10.0, capture_axis=True),
-    StageSegment("forward_ramp", DIR_FORWARD, "ramp", 8.0, 9.0, 10.0, 40.0),
-    StageSegment("forward_high", DIR_FORWARD, "high", 9.0, 13.0, 40.0, 40.0),
+    StageSegment("forward_low_10", DIR_FORWARD, "low", 5.0, 6.0, 10.0, 10.0, capture_axis=True),
+    StageSegment("forward_low_15", DIR_FORWARD, "low", 6.0, 7.0, 15.0, 15.0),
+    StageSegment("forward_low_5", DIR_FORWARD, "low", 7.0, 8.0, 5.0, 5.0),
+    StageSegment(
+        "forward_ramp_quad",
+        DIR_FORWARD,
+        "ramp",
+        8.0,
+        11.0,
+        10.0,
+        40.0,
+        force_interp=FORCE_INTERP_QUADRATIC,
+    ),
+    StageSegment("forward_high", DIR_FORWARD, "high", 11.0, 13.0, 40.0, 40.0),
     StageSegment("idle_1", DIR_NONE, "idle", 13.0, 20.0),
-    StageSegment("left_low", DIR_LEFT, "low", 20.0, 23.0, 10.0, 10.0, capture_axis=True),
-    StageSegment("left_ramp", DIR_LEFT, "ramp", 23.0, 24.0, 10.0, 40.0),
-    StageSegment("left_high", DIR_LEFT, "high", 24.0, 28.0, 40.0, 40.0),
+    StageSegment("left_low_10", DIR_LEFT, "low", 20.0, 21.0, 10.0, 10.0, capture_axis=True),
+    StageSegment("left_low_15", DIR_LEFT, "low", 21.0, 22.0, 15.0, 15.0),
+    StageSegment("left_low_5", DIR_LEFT, "low", 22.0, 23.0, 5.0, 5.0),
+    StageSegment(
+        "left_ramp_quad",
+        DIR_LEFT,
+        "ramp",
+        23.0,
+        26.0,
+        10.0,
+        40.0,
+        force_interp=FORCE_INTERP_QUADRATIC,
+    ),
+    StageSegment("left_high", DIR_LEFT, "high", 26.0, 28.0, 40.0, 40.0),
     StageSegment("idle_2", DIR_NONE, "idle", 28.0, 40.0),
-    StageSegment("backward_low", DIR_BACKWARD, "low", 40.0, 43.0, 10.0, 10.0, capture_axis=True),
-    StageSegment("backward_ramp", DIR_BACKWARD, "ramp", 43.0, 44.0, 10.0, 40.0),
-    StageSegment("backward_high", DIR_BACKWARD, "high", 44.0, 48.0, 40.0, 40.0),
+    StageSegment("backward_low_10", DIR_BACKWARD, "low", 40.0, 41.0, 10.0, 10.0, capture_axis=True),
+    StageSegment("backward_low_15", DIR_BACKWARD, "low", 41.0, 42.0, 15.0, 15.0),
+    StageSegment("backward_low_5", DIR_BACKWARD, "low", 42.0, 43.0, 5.0, 5.0),
+    StageSegment(
+        "backward_ramp_quad",
+        DIR_BACKWARD,
+        "ramp",
+        43.0,
+        46.0,
+        10.0,
+        40.0,
+        force_interp=FORCE_INTERP_QUADRATIC,
+    ),
+    StageSegment("backward_high", DIR_BACKWARD, "high", 46.0, 48.0, 40.0, 40.0),
     StageSegment("idle_3", DIR_NONE, "idle", 48.0, EPISODE_LENGTH_S),
 )
 
 
 parser = argparse.ArgumentParser(
-    description="Evaluate a UniFP Aliengo policy under a deterministic 60s zero-velocity staged force schedule."
+    description=(
+        "Evaluate a UniFP Aliengo policy under a deterministic 60s zero-velocity staged force schedule with "
+        "quadratic 3s force ramps."
+    )
 )
 policy_group = parser.add_mutually_exclusive_group(required=True)
 policy_group.add_argument("--checkpoint", type=str, help="Path to an RSL-RL checkpoint.")
