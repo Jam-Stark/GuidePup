@@ -644,4 +644,22 @@ def base_lin_vel_offset(
     elif locomotion_cmd.shape[1] == 1:
         base_lin_vel_cmd_xy[:, 0] = locomotion_cmd[:, 0]
 
-    return base_lin_vel_cmd_xy + base_force_ext_xy / base_kd
+    base_lin_vel_offset_xy = base_lin_vel_cmd_xy + base_force_ext_xy / base_kd
+
+    try:
+        locomotion_term = env.command_manager.get_term(locomotion_command_name)
+        x_clip = float(locomotion_term.cfg.lin_vel_x_clip)
+        y_clip = float(locomotion_term.cfg.lin_vel_y_clip)
+        yaw_clip = float(locomotion_term.cfg.ang_vel_yaw_clip)
+    except (KeyError, AttributeError, TypeError):
+        locomotion_term = None
+
+    if locomotion_term is not None:
+        non_stop_sign = (torch.abs(base_lin_vel_offset_xy[:, 0]) > x_clip) | (
+            torch.abs(base_lin_vel_offset_xy[:, 1]) > y_clip
+        )
+        if locomotion_cmd.shape[1] >= 3:
+            non_stop_sign |= torch.abs(locomotion_cmd[:, 2]) > yaw_clip
+        base_lin_vel_offset_xy *= non_stop_sign.unsqueeze(1)
+
+    return base_lin_vel_offset_xy

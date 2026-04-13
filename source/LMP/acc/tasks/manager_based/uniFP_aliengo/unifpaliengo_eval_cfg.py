@@ -28,6 +28,7 @@ RESET_JOINT_NAMES = [
     "arm_joint3",
     "arm_joint4",
     "arm_joint5",
+    "arm_joint6",
 ]
 
 
@@ -103,29 +104,19 @@ class UniFPAliengoReversePushEvalCfg(UniFPAliengoEnvCfg):
         self.viewer.eye = (4.0, -2.5, 2.2)
         self.viewer.lookat = (0.0, 0.0, 0.5)
 
-        self.scene.robot.actuators["hips"].stiffness = 180.0
-        self.scene.robot.actuators["hips"].damping = 4.0
-        self.scene.robot.actuators["thighs"].stiffness = 180.0
-        self.scene.robot.actuators["thighs"].damping = 4.0
-        self.scene.robot.actuators["calfs"].stiffness = 300.0
-        self.scene.robot.actuators["calfs"].damping = 6.5
+        self.scene.robot.actuators["hips"].stiffness = 100.0
+        self.scene.robot.actuators["hips"].damping = 3.5
+        self.scene.robot.actuators["thighs"].stiffness = 100.0
+        self.scene.robot.actuators["thighs"].damping = 3.5
+        self.scene.robot.actuators["calfs"].stiffness = 160.0
+        self.scene.robot.actuators["calfs"].damping = 7.0
         self.scene.robot.actuators["arm"].stiffness = 64.0
-        self.scene.robot.actuators["arm"].damping = 2.0
+        self.scene.robot.actuators["arm"].damping = 1.5
         self.scene.robot.actuators["arm_shoulder"].stiffness = 128.0
         self.scene.robot.actuators["arm_shoulder"].damping = 3.0
 
-        self.actions.arm_actions.scale = 0.0
-
         self.commands.gait_phase.gait_frequency = 3.0
-        self.commands.target_position_commands.ranges.radius = (0.60, 0.60)
-        self.commands.target_position_commands.ranges.pitch_angle = (0.0, 0.0)
-        self.commands.target_position_commands.ranges.yaw_angle = (0.0, 0.0)
         self.commands.locomotion_commands.debug_vis = False
-        self.commands.target_position_commands.debug_vis = False
-
-        self.commands.gripper_force_ext.force_range = (0.0, 0.0)
-        self.commands.gripper_force_command.force_range = (0.0, 0.0)
-        self.commands.base_force_command.force_range = (0.0, 0.0)
 
         self.commands.locomotion_commands.resampling_time_range = (1.0e9, 1.0e9)
         self.commands.locomotion_commands.rel_standing_envs = 0.0
@@ -134,6 +125,5 @@ class UniFPAliengoReversePushEvalCfg(UniFPAliengoEnvCfg):
         self.commands.locomotion_commands.ranges.ang_vel_z = (0.0, 0.0)
 
         self.rewards.feet_air_time.params["target_air_time"] = 0.1667
-        self.rewards.tracking_ee_force_world.weight = 0.0
 
         self.observations.policy.enable_corruption = False

@@ -23,6 +23,8 @@ from isaaclab.app import AppLauncher
 
 EPISODE_LENGTH_S = 60.0
 LONG_RESAMPLING_S = 1.0e9
+EVAL_VARIANT_TAG = "base_force_only"
+EVAL_VARIANT_NOTE = "base-force-only"
 
 DIR_NONE = "none"
 DIR_FORWARD = "forward"
@@ -75,7 +77,10 @@ STAGE_SEGMENTS = (
 
 
 parser = argparse.ArgumentParser(
-    description="Evaluate a UniFP Aliengo policy under a deterministic 60s zero-velocity staged force schedule."
+    description=(
+        "Evaluate a UniFP Aliengo policy under a deterministic 60s zero-velocity staged force schedule "
+        f"for the {EVAL_VARIANT_NOTE} task variant."
+    )
 )
 policy_group = parser.add_mutually_exclusive_group(required=True)
 policy_group.add_argument("--checkpoint", type=str, help="Path to an RSL-RL checkpoint.")
@@ -126,7 +131,7 @@ def resolve_output_csv(path_str: str | None) -> Path:
             Path("logs")
             / "experiments"
             / "unifp_staged_direction_force"
-            / f"staged_direction_force_{stamp}.csv"
+            / f"staged_direction_force_{EVAL_VARIANT_TAG}_{stamp}.csv"
         ).resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     return output_path
@@ -209,7 +214,6 @@ def extract_force_estimator_outputs(
     obs,
     estimator_model,
     *,
-    gripper_force_scale: float,
     base_force_scale: float,
 ):
     num_envs = obs.batch_size[0]
@@ -219,9 +223,6 @@ def extract_force_estimator_outputs(
 
     if estimator_model is None or not hasattr(estimator_model, "predict") or "pred" not in obs:
         return {
-            "gripper_force_est_local": nan_force.clone(),
-            "gripper_force_tgt_local": nan_force.clone(),
-            "gripper_force_err_l2": nan_err.clone(),
             "base_force_est_local": nan_force.clone(),
             "base_force_tgt_local": nan_force.clone(),
             "base_force_err_l2": nan_err.clone(),
@@ -230,15 +231,10 @@ def extract_force_estimator_outputs(
     pred_target_scaled = obs["pred"]
     pred_est_scaled = estimator_model.predict(obs)
 
-    gripper_force_est_local = pred_est_scaled[:, 6:9] / gripper_force_scale
-    gripper_force_tgt_local = pred_target_scaled[:, 6:9] / gripper_force_scale
-    base_force_est_local = pred_est_scaled[:, 9:12] / base_force_scale
-    base_force_tgt_local = pred_target_scaled[:, 9:12] / base_force_scale
+    base_force_est_local = pred_est_scaled[:, 3:6] / base_force_scale
+    base_force_tgt_local = pred_target_scaled[:, 3:6] / base_force_scale
 
     return {
-        "gripper_force_est_local": gripper_force_est_local,
-        "gripper_force_tgt_local": gripper_force_tgt_local,
-        "gripper_force_err_l2": torch.linalg.norm(gripper_force_est_local - gripper_force_tgt_local, dim=-1),
         "base_force_est_local": base_force_est_local,
         "base_force_tgt_local": base_force_tgt_local,
         "base_force_err_l2": torch.linalg.norm(base_force_est_local - base_force_tgt_local, dim=-1),
@@ -437,9 +433,6 @@ def write_csv_rows(
     root_pos_xy: torch.Tensor,
     estimator_outputs: dict[str, torch.Tensor],
 ):
-    gripper_force_est_local = estimator_outputs["gripper_force_est_local"]
-    gripper_force_tgt_local = estimator_outputs["gripper_force_tgt_local"]
-    gripper_force_err_l2 = estimator_outputs["gripper_force_err_l2"]
     base_force_est_local = estimator_outputs["base_force_est_local"]
     base_force_tgt_local = estimator_outputs["base_force_tgt_local"]
     base_force_err_l2 = estimator_outputs["base_force_err_l2"]
@@ -467,13 +460,6 @@ def write_csv_rows(
                 f"{cross_disp[env_id].item():.6f}",
                 f"{root_pos_xy[env_id, 0].item():.6f}",
                 f"{root_pos_xy[env_id, 1].item():.6f}",
-                f"{gripper_force_est_local[env_id, 0].item():.6f}",
-                f"{gripper_force_est_local[env_id, 1].item():.6f}",
-                f"{gripper_force_est_local[env_id, 2].item():.6f}",
-                f"{gripper_force_tgt_local[env_id, 0].item():.6f}",
-                f"{gripper_force_tgt_local[env_id, 1].item():.6f}",
-                f"{gripper_force_tgt_local[env_id, 2].item():.6f}",
-                f"{gripper_force_err_l2[env_id].item():.6f}",
                 f"{base_force_est_local[env_id, 0].item():.6f}",
                 f"{base_force_est_local[env_id, 1].item():.6f}",
                 f"{base_force_est_local[env_id, 2].item():.6f}",
@@ -489,7 +475,6 @@ def main():
     output_csv = resolve_output_csv(args_cli.output_csv)
     env_cfg = build_env_cfg()
     env = ManagerBasedRLEnv(cfg=env_cfg)
-    gripper_force_obs_scale = float(env_cfg.observations.pred.gripper_forces_local.scale)
     base_force_obs_scale = float(env_cfg.observations.pred.base_forces_local.scale)
 
     checkpoint_path = retrieve_file_path(args_cli.checkpoint) if args_cli.checkpoint else None
@@ -515,10 +500,14 @@ def main():
 
     force_term = env.command_manager.get_term("base_force_ext")
     if not hasattr(force_term, "set_force") or not hasattr(force_term, "clear_force"):
-        raise TypeError("commands.base_force_ext must be a scripted force term exposing set_force()/clear_force().")
+        raise TypeError(
+            f"commands.base_force_ext must be a scripted force term exposing set_force()/clear_force() for "
+            f"{EVAL_VARIANT_NOTE} evaluation."
+        )
     markers = StagedDirectionForceMarkers(env)
     scheduler = StagedDirectionForceScheduler(num_envs=env.num_envs, device=env.device)
 
+    print(f"[INFO] Starting staged-direction {EVAL_VARIANT_NOTE} evaluation.")
     if livestream_enabled:
         print("[INFO] LIVESTREAM enabled; cameras forced on for WebRTC compatibility.")
 
@@ -534,8 +523,6 @@ def main():
     active_force_sample_count = torch.zeros(num_envs, dtype=torch.long, device=device)
     base_force_err_active_sum = torch.zeros(num_envs, device=device)
     base_force_err_active_max = torch.zeros(num_envs, device=device)
-    gripper_force_err_active_sum = torch.zeros(num_envs, device=device)
-    gripper_force_err_active_max = torch.zeros(num_envs, device=device)
 
     ended_early = False
     end_step = max_steps
@@ -565,13 +552,6 @@ def main():
                 "cross_disp",
                 "root_x",
                 "root_y",
-                "gripper_force_est_local_x",
-                "gripper_force_est_local_y",
-                "gripper_force_est_local_z",
-                "gripper_force_tgt_local_x",
-                "gripper_force_tgt_local_y",
-                "gripper_force_tgt_local_z",
-                "gripper_force_err_l2",
                 "base_force_est_local_x",
                 "base_force_est_local_y",
                 "base_force_est_local_z",
@@ -618,7 +598,6 @@ def main():
                 estimator_outputs = extract_force_estimator_outputs(
                     obs,
                     estimator_model,
-                    gripper_force_scale=gripper_force_obs_scale,
                     base_force_scale=base_force_obs_scale,
                 )
 
@@ -666,11 +645,6 @@ def main():
                     base_force_err_active_max,
                     estimator_outputs["base_force_err_l2"],
                 )
-                gripper_force_err_active_sum += estimator_outputs["gripper_force_err_l2"]
-                gripper_force_err_active_max = torch.maximum(
-                    gripper_force_err_active_max,
-                    estimator_outputs["gripper_force_err_l2"],
-                )
 
             markers.update()
 
@@ -713,7 +687,7 @@ def main():
 
     force_term.clear_force()
 
-    print(f"[INFO] CSV written to: {output_csv}")
+    print(f"[INFO] {EVAL_VARIANT_NOTE} CSV written to: {output_csv}")
     if ended_early:
         print(f"[WARN] Evaluation ended before the planned timeout-only horizon at step={end_step}.")
     else:
@@ -726,15 +700,7 @@ def main():
             if active_samples > 0
             else float("nan")
         )
-        gripper_force_err_active_mean = (
-            (gripper_force_err_active_sum[env_id] / active_force_sample_count[env_id]).item()
-            if active_samples > 0
-            else float("nan")
-        )
         base_force_err_peak = base_force_err_active_max[env_id].item() if active_samples > 0 else float("nan")
-        gripper_force_err_peak = (
-            gripper_force_err_active_max[env_id].item() if active_samples > 0 else float("nan")
-        )
 
         forward_proj_disp = finite_or_nan(block_last_proj_disp[env_id, DIRECTION_INDEX[DIR_FORWARD]].item())
         left_proj_disp = finite_or_nan(block_last_proj_disp[env_id, DIRECTION_INDEX[DIR_LEFT]].item())
@@ -771,9 +737,7 @@ def main():
             f"backward_cross_disp={format_optional(backward_cross_disp)} "
             f"backward_cross_speed_peak={format_optional(backward_cross_speed_peak)} "
             f"base_force_err_active_mean={format_optional(base_force_err_active_mean)} "
-            f"base_force_err_peak={format_optional(base_force_err_peak)} "
-            f"gripper_force_err_active_mean={format_optional(gripper_force_err_active_mean)} "
-            f"gripper_force_err_peak={format_optional(gripper_force_err_peak)}"
+            f"base_force_err_peak={format_optional(base_force_err_peak)}"
         )
 
     env.close()

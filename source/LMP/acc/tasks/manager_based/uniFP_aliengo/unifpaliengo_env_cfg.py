@@ -55,11 +55,11 @@ from .metrics import (
 # Global configuration constants
 ##
 FORCE_COMMAND_RESUME_STEPS = 0 * 24  # 恢复力命令的训练步数阈值
-FORCE_COMMAND_START_STEPS = 8000 * 24  # 启用力命令的训练步数阈值
+FORCE_COMMAND_START_STEPS = 6000 * 24  # 启用力命令的训练步数阈值
 GRIPPER_EXT_FULL_RANGE = (0.0, 0.0)  # gripper力的完整范围
 GRIPPER_CMD_FULL_RANGE = (0.0, 0.0)  # gripper命令的完整范围
-BASE_EXT_FULL_RANGE = (-30.0, 30.0)  # base力的完整范围
-BASE_CMD_FULL_RANGE = (-30.0, 30.0)  # base命令的完整范围
+BASE_EXT_FULL_RANGE = (-40.0, 40.0)  # base力的完整范围
+BASE_CMD_FULL_RANGE = (0.0, 0.0)  # base命令的完整范围
 BASE_FORCE_KD = 100.0
 POLICY_OBS_DELAY_RANGE_STEPS = (0, 2)  # policy观测延迟范围（env steps）
 LEG_ACTION_DELAY_RANGE_STEPS = (0, 1)  # 腿部动作延迟范围（env steps）
@@ -113,8 +113,8 @@ class CommandsCfg:
         class Ranges:
             """Ranges for the commands."""
 
-            lin_vel_x: Tuple[float, float] = (0.8, 0.8)
-            lin_vel_y: Tuple[float, float] = (-0.5, 0.5)
+            lin_vel_x: Tuple[float, float] = (-1.2, 1.2)
+            lin_vel_y: Tuple[float, float] = (-0.6, 0.6)
             ang_vel_z: Tuple[float, float] = (-1.0, 1.0)
             heading: Tuple[float, float] = (-math.pi, math.pi)
 
@@ -485,8 +485,8 @@ class UniFPSceneCfg(InteractiveSceneCfg):
                 ],
                 effort_limit_sim=35.0,
                 velocity_limit_sim=20.0,
-                stiffness=80.0,
-                damping=2.5,
+                stiffness=100.0,
+                damping=3.5,
                 armature=0.0,
             ),
             "thighs": ImplicitActuatorCfg(
@@ -495,8 +495,8 @@ class UniFPSceneCfg(InteractiveSceneCfg):
                 ],
                 effort_limit_sim=35.0,
                 velocity_limit_sim=20.0,
-                stiffness=80.0,
-                damping=2.5,
+                stiffness=100.0,
+                damping=3.5,
                 armature=0.0,
             ),
             "calfs": ImplicitActuatorCfg(
@@ -508,7 +508,7 @@ class UniFPSceneCfg(InteractiveSceneCfg):
                 # Aliengo URDF: Hip/Thigh max 20 rad/s, Calf 15.9 rad/s
                 velocity_limit_sim=15.0,
                 stiffness=160.0,
-                damping=3.0,
+                damping=7.0,
                 armature=0.0,
             ),
             "arm": ImplicitActuatorCfg(
@@ -1112,20 +1112,7 @@ class EventCfg:
     # ========== 间隔触发事件 (interval mode) ==========
     
     # 7. 推动机器人 - 每8秒施加一次随机速度
-    push_robot = EventTerm(
-        func=mdp.push_by_setting_velocity_standInclude,
-        mode="interval",
-        interval_range_s=(8.0, 8.0),  # 每8秒触发一次
-        params={
-            "velocity_range": {
-                "x": (-0.3, 0.3),  # x方向速度范围 (m/s)
-                "y": (-0.3, 0.3),  # y方向速度范围 (m/s)
-            },
-            "asset_cfg": SceneEntityCfg("robot"),
-            "command_name": "locomotion_commands",
-            "standing_velocity_scale": 1.2,
-        },
-    )
+    push_robot = None
 
 
 @configclass

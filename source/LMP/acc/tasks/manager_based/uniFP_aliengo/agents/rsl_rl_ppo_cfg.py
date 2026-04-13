@@ -35,7 +35,7 @@ class PPORunnerCfg(RslRlOnPolicyRunnerCfg):
     class_name = "OnPolicyRunnerAdaptation"
     num_steps_per_env = 24
     max_iterations = 60000
-    save_interval = 200
+    save_interval = 400
     experiment_name = "uniFP_aliengo_position_force"
     policy = CustomPpoActorCriticCfg(
         init_noise_std=1.0,
