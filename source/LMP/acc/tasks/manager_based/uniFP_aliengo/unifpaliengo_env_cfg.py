@@ -55,7 +55,7 @@ from .metrics import (
 # Global configuration constants
 ##
 FORCE_COMMAND_RESUME_STEPS = 0 * 24  # 恢复力命令的训练步数阈值
-FORCE_COMMAND_START_STEPS = 6000 * 24  # 启用力命令的训练步数阈值
+FORCE_COMMAND_START_STEPS = 8000 * 24  # 启用力命令的训练步数阈值
 GRIPPER_EXT_FULL_RANGE = (0.0, 0.0)  # gripper力的完整范围
 GRIPPER_CMD_FULL_RANGE = (0.0, 0.0)  # gripper命令的完整范围
 BASE_EXT_FULL_RANGE = (-40.0, 40.0)  # base力的完整范围
@@ -156,7 +156,7 @@ class CommandsCfg:
         """Configuration for open-loop gait phase clock."""
 
         locomotion_command_name: str = "locomotion_commands"
-        gait_frequency: float = 2.0
+        gait_frequency: float = 3.0
         phase_offset: float = 0.5
         initial_phase: float = 0.0
 

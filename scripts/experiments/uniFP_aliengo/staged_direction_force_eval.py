@@ -150,6 +150,16 @@ def build_env_cfg() -> UniFPAliengoReversePushEvalCfg:
     env_cfg.commands.locomotion_commands.ranges.lin_vel_x = (0.0, 0.0)
     env_cfg.commands.locomotion_commands.ranges.lin_vel_y = (0.0, 0.0)
     env_cfg.commands.locomotion_commands.ranges.ang_vel_z = (0.0, 0.0)
+ 
+    #env_cfg.commands.gait_phase.gait_frequency = 2.0
+
+    # Temporary actuator override for staged-direction force evaluation.
+    """env_cfg.scene.robot.actuators["hips"].stiffness = 180.0
+    env_cfg.scene.robot.actuators["hips"].damping = 4.0
+    env_cfg.scene.robot.actuators["thighs"].stiffness = 180.0
+    env_cfg.scene.robot.actuators["thighs"].damping = 4.0
+    env_cfg.scene.robot.actuators["calfs"].stiffness = 300.0
+    env_cfg.scene.robot.actuators["calfs"].damping = 6.5"""
 
     # Isaac Lab managers skip None-valued terms during preparation, which disables early termination here.
     env_cfg.terminations.base_height = None
