@@ -22,6 +22,18 @@ parser.add_argument("--checkpoint", type=str, required=True, help="Path to an RS
 parser.add_argument("--output-dir", type=str, default=None, help="Optional output directory.")
 parser.add_argument("--num-envs", type=int, default=2, help="Number of Isaac envs used for export validation.")
 parser.add_argument("--seed", type=int, default=0, help="Environment seed.")
+parser.add_argument(
+    "--policy-history-length",
+    type=int,
+    default=None,
+    help="Optional override for the policy observation history length used during checkpoint reconstruction/export.",
+)
+parser.add_argument(
+    "--walking-gait-frequency",
+    type=float,
+    default=None,
+    help="Optional override for the gait frequency recorded in the exported smart-gait metadata.",
+)
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
 if hasattr(args_cli, "headless"):
@@ -42,7 +54,7 @@ from acc.algorithms.rsl_rl.runner import OnPolicyRunnerAdaptation
 from acc.tasks.manager_based.uniFP_aliengo.agents.rsl_rl_ppo_cfg import PPORunnerCfg
 from acc.tasks.manager_based.uniFP_aliengo.unifpaliengo_eval_cfg import UniFPAliengoReversePushEvalCfg
 
-from runtime import default_staged_eval_metadata
+from runtime import default_smart_gait_metadata
 
 
 class AdaptationPolicyWrapper(torch.nn.Module):
@@ -75,6 +87,14 @@ def build_env_cfg() -> UniFPAliengoReversePushEvalCfg:
     env_cfg.seed = args_cli.seed
     if args_cli.device is not None:
         env_cfg.sim.device = args_cli.device
+    if args_cli.walking_gait_frequency is not None:
+        env_cfg.commands.gait_phase.gait_frequency = float(args_cli.walking_gait_frequency)
+    if args_cli.policy_history_length is not None:
+        if int(args_cli.policy_history_length) <= 0:
+            raise ValueError(
+                f"--policy-history-length must be positive, got {args_cli.policy_history_length}."
+            )
+        env_cfg.observations.policy.history_length = int(args_cli.policy_history_length)
     return env_cfg
 
 
@@ -108,6 +128,8 @@ def main() -> None:
 
     agent_cfg = PPORunnerCfg()
     agent_cfg.device = env.device
+    if args_cli.policy_history_length is not None:
+        agent_cfg.policy.history_num_frames = int(args_cli.policy_history_length)
     wrapped_env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
     runner = OnPolicyRunnerAdaptation(wrapped_env, agent_cfg.to_dict(), log_dir=None, device=env.device)
     print(f"[INFO] Loading checkpoint: {checkpoint_path}")
@@ -144,10 +166,11 @@ def main() -> None:
         raise RuntimeError(f"Export validation failed: max absolute error {max_err:.3e} exceeds tolerance 1e-5.")
 
     metadata = replace(
-        default_staged_eval_metadata(),
+        default_smart_gait_metadata(),
         action_dim=int(actions.shape[-1]),
         per_frame_obs_dim=int(policy_model.curr_obs_dim),
         history_length=int(policy_model.history_num_frames),
+        gait_frequency_hz=float(env_cfg.commands.gait_phase.gait_frequency),
     )
     metadata.write_json(metadata_output_path)
 

@@ -91,5 +91,32 @@ PUBLIC_IP=10.13.11.197 LIVESTREAM=1 python scripts/experiments/uniFP_aliengo/sma
 #表现很差
 
 
+## MuJoCo
+
+当前 smart gait 只改了 policy observation / action 契约，没有改 `resources/aliengoZ1/mujoco` 里的机器人资源，因此 MuJoCo 模型文件可以继续复用。需要更新的是 IO descriptor、policy metadata 和 MuJoCo runner。
+
+```bash
+python scripts/export_io_descriptors.py \
+  --env-cfg reverse_push_eval \
+  --policy-history-length 24 \
+  --output-dir io_descriptors/unifp_smart_gait_24history \
+  --headless
+```
+
+```bash
+python scripts/mujoco/export_policy_wrapper.py \
+  --checkpoint logs/rsl_rl/uniFP_aliengo_position_force/2026-04-14_22-28-32_ext_force_only_lowerHistory/model_28000.pt \
+  --policy-history-length 24 \
+  --output-dir logs/rsl_rl/uniFP_aliengo_position_force/2026-04-14_22-28-32_ext_force_only_lowerHistory/mujoco_exported \
+  --headless
+```
+
+```bash
+python scripts/mujoco/smart_gait.py \
+  --policy-path logs/rsl_rl/uniFP_aliengo_position_force/2026-04-14_22-28-32_ext_force_only_lowerHistory/mujoco_exported/policy.pt \
+  --policy-history-length 24 \
+  --force-schedule human_guide \
+  --output-csv logs/experiments/unifp_smart_gait_mujoco/24history_ha_v2.csv
+```
 
 

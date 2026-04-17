@@ -15,22 +15,10 @@ except ImportError:
     torch = None
 
 
-DEFAULT_COMMAND_SCALES = (
+DEFAULT_LOCOMOTION_COMMAND_SCALES = (
     2.0,
     2.0,
     0.25,
-    0.5,
-    1.0,
-    1.3,
-    0.5,
-    0.5,
-    0.5,
-    0.01,
-    0.01,
-    0.01,
-    0.01,
-    0.01,
-    0.01,
 )
 
 
@@ -66,15 +54,10 @@ def _default_obs_joint_names() -> tuple[str, ...]:
         "FR_thigh_joint",
         "RL_thigh_joint",
         "RR_thigh_joint",
-        "arm_joint1",
         "FL_calf_joint",
         "FR_calf_joint",
         "RL_calf_joint",
         "RR_calf_joint",
-        "arm_joint2",
-        "arm_joint3",
-        "arm_joint4",
-        "arm_joint5",
     )
 
 
@@ -110,15 +93,10 @@ def _default_obs_joint_positions() -> tuple[float, ...]:
         0.5,
         0.5,
         0.5,
-        0.0,
         -1.0,
         -1.0,
         -1.0,
         -1.0,
-        1.48,
-        -0.63,
-        -0.84,
-        0.0,
     )
 
 
@@ -138,21 +116,21 @@ class UniFPPolicyMetadata:
     obs_default_joint_pos: tuple[float, ...] = field(default_factory=_default_obs_joint_positions)
     auxiliary_joint_defaults: dict[str, float] = field(default_factory=_default_auxiliary_joint_defaults)
     action_scale: float = 0.25
-    action_dim: int = 17
+    action_dim: int = 12
     leg_action_dim: int = 12
-    per_frame_obs_dim: int = 73
+    per_frame_obs_dim: int = 46
     history_length: int = 32
     sim_dt: float = 1.0 / 200.0
     control_decimation: int = 4
-    gait_frequency_hz: float = 2.0
+    gait_frequency_hz: float = 3.0
     joint_vel_scale: float = 0.05
     base_ang_vel_scale: float = 0.25
-    command_scales: tuple[float, ...] = DEFAULT_COMMAND_SCALES
+    command_scales: tuple[float, ...] = DEFAULT_LOCOMOTION_COMMAND_SCALES
     default_locomotion_cmd: tuple[float, float, float] = (0.0, 0.0, 0.0)
     default_ee_sphere_cmd: tuple[float, float, float] = (0.55, 0.0, 0.0)
     default_gripper_force_cmd: tuple[float, float, float] = (0.0, 0.0, 0.0)
     default_base_force_cmd: tuple[float, float, float] = (0.0, 0.0, 0.0)
-    freeze_arm_actions: bool = False
+    freeze_arm_actions: bool = True
     action_clip: float = 100.0
     joint_actuator_gains: dict[str, tuple[float, float]] = field(default_factory=_default_joint_actuator_gains)
 
@@ -287,6 +265,40 @@ def default_staged_eval_metadata() -> UniFPPolicyMetadata:
     return replace(
         default_runtime_metadata(),
         gait_frequency_hz=3.0,
+        default_locomotion_cmd=(0.0, 0.0, 0.0),
+        default_ee_sphere_cmd=(0.60, 0.0, 0.0),
+        default_gripper_force_cmd=(0.0, 0.0, 0.0),
+        default_base_force_cmd=(0.0, 0.0, 0.0),
+        freeze_arm_actions=True,
+        joint_actuator_gains=gains,
+    )
+
+
+def default_smart_gait_metadata() -> UniFPPolicyMetadata:
+    # Match UniFPAliengoReversePushEvalCfg actuator settings with the same
+    # MuJoCo compensation rule used by staged eval: kp×0.6, kv×0.7.
+    gains = {
+        "FL_hip_joint": (60.0, 2.45),     # IsaacLab smart gait: (100, 3.5)
+        "FR_hip_joint": (60.0, 2.45),
+        "RL_hip_joint": (60.0, 2.45),
+        "RR_hip_joint": (60.0, 2.45),
+        "FL_thigh_joint": (60.0, 2.45),
+        "FR_thigh_joint": (60.0, 2.45),
+        "RL_thigh_joint": (60.0, 2.45),
+        "RR_thigh_joint": (60.0, 2.45),
+        "FL_calf_joint": (96.0, 4.9),     # IsaacLab smart gait: (160, 7.0)
+        "FR_calf_joint": (96.0, 4.9),
+        "RL_calf_joint": (96.0, 4.9),
+        "RR_calf_joint": (96.0, 4.9),
+        "arm_joint1": (38.4, 1.05),       # IsaacLab smart gait: (64, 1.5)
+        "arm_joint2": (76.8, 2.1),        # IsaacLab smart gait: (128, 3.0)
+        "arm_joint3": (38.4, 1.05),
+        "arm_joint4": (38.4, 1.05),
+        "arm_joint5": (38.4, 1.05),
+    }
+    return replace(
+        default_runtime_metadata(),
+        gait_frequency_hz=2.0,
         default_locomotion_cmd=(0.0, 0.0, 0.0),
         default_ee_sphere_cmd=(0.60, 0.0, 0.0),
         default_gripper_force_cmd=(0.0, 0.0, 0.0),
@@ -494,7 +506,7 @@ def build_command_vector(
 ) -> np.ndarray:
     if ee_orientation_cmd is None:
         ee_orientation_cmd = (0.0, 0.0, 0.0)
-    command = np.concatenate(
+    full_command = np.concatenate(
         (
             parse_triplet(locomotion_cmd),
             parse_triplet(ee_sphere_cmd),
@@ -505,7 +517,13 @@ def build_command_vector(
         axis=0,
     )
     scales = np.asarray(metadata.command_scales, dtype=np.float32)
-    return command * scales
+    if scales.ndim != 1:
+        raise RuntimeError(f"Expected 1-D command scales, received shape {tuple(scales.shape)}")
+    if scales.size > full_command.size:
+        raise RuntimeError(
+            f"Command scale length {int(scales.size)} exceeds supported command size {int(full_command.size)}."
+        )
+    return full_command[: scales.size] * scales
 
 
 @dataclass(frozen=True)
@@ -634,8 +652,10 @@ def compute_policy_terms(
     delayed_joint_pos: np.ndarray,
     delayed_joint_vel: np.ndarray,
     metadata: UniFPPolicyMetadata,
+    *,
+    gait_override: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    gait = gait_clock(float(data.time), metadata)
+    gait = gait_clock(float(data.time), metadata) if gait_override is None else np.asarray(gait_override, dtype=np.float32)
     frame = np.concatenate(
         (
             delayed_base_orientation,
@@ -817,6 +837,7 @@ def initialize_runtime_state(
     obs_delay_steps: int,
     leg_action_delay_steps: int,
     command_obs: np.ndarray,
+    gait_override: np.ndarray | None = None,
 ) -> PolicyRuntimeState:
     base_orientation_history = FrameStacker(2, metadata.history_length)
     base_ang_vel_history = FrameStacker(3, metadata.history_length)
@@ -852,6 +873,7 @@ def initialize_runtime_state(
         delayed_joint_pos=delayed_joint_pos,
         delayed_joint_vel=delayed_joint_vel,
         metadata=metadata,
+        gait_override=gait_override,
     )
     base_orientation_history.reset(initial_terms[0])
     base_ang_vel_history.reset(initial_terms[1])
@@ -885,6 +907,7 @@ def update_runtime_state_after_step(
     *,
     action: np.ndarray,
     command_obs: np.ndarray,
+    gait_override: np.ndarray | None = None,
 ) -> None:
     runtime_state.last_action = action.astype(np.float32, copy=True)
     proprio = compute_proprio(data, bindings.obs_qpos_indices, bindings.obs_qvel_indices, metadata)
@@ -902,6 +925,7 @@ def update_runtime_state_after_step(
         delayed_joint_pos=delayed_joint_pos,
         delayed_joint_vel=delayed_joint_vel,
         metadata=metadata,
+        gait_override=gait_override,
     )
     runtime_state.base_orientation_history.append(terms[0])
     runtime_state.base_ang_vel_history.append(terms[1])

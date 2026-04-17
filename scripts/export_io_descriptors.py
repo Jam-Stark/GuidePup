@@ -32,7 +32,25 @@ from _extension_source import append_acc_source_dir
 
 
 parser = argparse.ArgumentParser(description="Export IO descriptors for a registered IsaacLab environment.")
-parser.add_argument("--task", type=str, required=True, help="Registered task name, e.g. Template-UniFPAliengo-v0.")
+parser.add_argument(
+    "--task",
+    type=str,
+    default=None,
+    help="Registered task name, required when --env-cfg=registered_task.",
+)
+parser.add_argument(
+    "--env-cfg",
+    type=str,
+    default="registered_task",
+    choices=("registered_task", "reverse_push_eval"),
+    help="How to construct the Isaac environment before exporting descriptors.",
+)
+parser.add_argument(
+    "--descriptor-name",
+    type=str,
+    default=None,
+    help="Optional label used for the default output directory when --output-dir is omitted.",
+)
 parser.add_argument(
     "--output-dir",
     type=str,
@@ -46,6 +64,12 @@ parser.add_argument(
     help="Output YAML filename written under --output-dir.",
 )
 parser.add_argument("--num-envs", type=int, default=1, help="Number of environments used for task instantiation.")
+parser.add_argument(
+    "--policy-history-length",
+    type=int,
+    default=None,
+    help="Optional override for observations.policy.history_length before exporting descriptors.",
+)
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
 args_cli.headless = True
@@ -60,9 +84,11 @@ import gymnasium as gym
 import yaml
 
 import isaaclab_tasks  # noqa: F401
+from isaaclab.envs import ManagerBasedRLEnv
 from isaaclab_tasks.utils import parse_env_cfg
 
 import acc.tasks  # noqa: F401
+from acc.tasks.manager_based.uniFP_aliengo.unifpaliengo_eval_cfg import UniFPAliengoReversePushEvalCfg
 
 
 def export_articulations_data_compat(env) -> dict[str, dict[str, list[float]]]:
@@ -255,6 +281,21 @@ def collect_observation_group_descriptors(env, group_names: list[str]) -> dict[s
                     ],
                 },
             )
+        if func_name == "locomotion_commands_with_scales":
+            return _descriptor_template(
+                func,
+                shape,
+                dtype,
+                "Command",
+                extras={
+                    "units": "mixed",
+                    "axes": [
+                        "base_lin_vel_x",
+                        "base_lin_vel_y",
+                        "base_ang_vel_z",
+                    ],
+                },
+            )
 
         return _descriptor_template(func, shape, dtype, "Observation")
 
@@ -338,6 +379,11 @@ def collect_observation_group_descriptors(env, group_names: list[str]) -> dict[s
                     "base_force": term_cfg.params.get("base_force_command_name", "base_force_command"),
                 }
                 item["command_scales"] = list(term_cfg.params.get("scales", []))
+            if term_cfg.func.__name__ == "locomotion_commands_with_scales":
+                item["command_term_names"] = {
+                    "locomotion": term_cfg.params.get("locomotion_command_name", "locomotion_commands"),
+                }
+                item["command_scales"] = list(term_cfg.params.get("scales", []))
 
             print(f"[INFO]   Observation term metadata assembled from cached config: {term_name}", flush=True)
             overloads = {}
@@ -372,7 +418,7 @@ def collect_action_descriptors(env) -> list[dict]:
 
     Similar to observations, this avoids depending on installed IsaacLab versions or
     custom term IO paths during the minimal export pass. For Phase A we only need the
-    policy-controlled 17D position actions.
+    policy-controlled joint position actions.
     """
 
     import torch
@@ -435,8 +481,8 @@ def collect_action_descriptors(env) -> list[dict]:
     return formatted_data
 
 
-def resolve_output_path(task_name: str, output_dir_arg: str | None, output_file: str) -> Path:
-    task_stem = task_name.lower().replace("-", "_").replace(" ", "_")
+def resolve_output_path(descriptor_name: str, output_dir_arg: str | None, output_file: str) -> Path:
+    task_stem = descriptor_name.lower().replace("-", "_").replace(" ", "_")
     if output_dir_arg:
         output_dir = Path(output_dir_arg).expanduser().resolve()
     else:
@@ -445,14 +491,39 @@ def resolve_output_path(task_name: str, output_dir_arg: str | None, output_file:
     return output_dir / output_file
 
 
-def main() -> None:
+def build_env() -> tuple[ManagerBasedRLEnv, str]:
+    if args_cli.policy_history_length is not None and int(args_cli.policy_history_length) <= 0:
+        raise ValueError(f"--policy-history-length must be positive, got {args_cli.policy_history_length}.")
+
+    if args_cli.env_cfg == "reverse_push_eval":
+        env_cfg = UniFPAliengoReversePushEvalCfg()
+        env_cfg.scene.num_envs = args_cli.num_envs
+        if args_cli.device is not None:
+            env_cfg.sim.device = args_cli.device
+        if args_cli.policy_history_length is not None:
+            env_cfg.observations.policy.history_length = int(args_cli.policy_history_length)
+        env = ManagerBasedRLEnv(cfg=env_cfg)
+        descriptor_name = args_cli.descriptor_name or "unifp_reverse_push_eval"
+        return env, descriptor_name
+
+    if not args_cli.task:
+        raise ValueError("--task is required when --env-cfg=registered_task.")
+
     env_cfg = parse_env_cfg(
         args_cli.task,
         device=args_cli.device,
         num_envs=args_cli.num_envs,
         use_fabric=True,
     )
+    if args_cli.policy_history_length is not None:
+        env_cfg.observations.policy.history_length = int(args_cli.policy_history_length)
     env = gym.make(args_cli.task, cfg=env_cfg)
+    descriptor_name = args_cli.descriptor_name or args_cli.task
+    return env, descriptor_name
+
+
+def main() -> None:
+    env, descriptor_name = build_env()
 
     print(f"[INFO] Gym observation space: {env.observation_space}")
     print(f"[INFO] Gym action space: {env.action_space}")
@@ -475,7 +546,7 @@ def main() -> None:
         "articulations": export_articulations_data_compat(env.unwrapped),
         "scene": export_scene_data_compat(env.unwrapped),
     }
-    output_path = resolve_output_path(args_cli.task, args_cli.output_dir, args_cli.output_file)
+    output_path = resolve_output_path(descriptor_name, args_cli.output_dir, args_cli.output_file)
 
     with output_path.open("w") as f:
         print(f"[INFO] Exporting IO descriptors to: {output_path}", flush=True)

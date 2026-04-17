@@ -271,12 +271,16 @@ def write_csv_row(
 
 
 def extract_force_estimator_outputs(pred_est: np.ndarray, base_force_tgt_local: np.ndarray) -> dict[str, np.ndarray | float]:
-    if pred_est.shape != (12,):
-        raise RuntimeError(f"Expected pred_est shape (12,), received {pred_est.shape}")
+    if pred_est.shape == (12,):
+        gripper_force_est_local = pred_est[6:9] / 0.01
+        base_force_est_local = pred_est[9:12] / 0.01
+    elif pred_est.shape == (6,):
+        gripper_force_est_local = np.zeros(3, dtype=np.float32)
+        base_force_est_local = pred_est[3:6] / 0.01
+    else:
+        raise RuntimeError(f"Expected pred_est shape (6,) or (12,), received {pred_est.shape}")
 
-    gripper_force_est_local = pred_est[6:9] / 0.01
     gripper_force_tgt_local = np.zeros(3, dtype=np.float32)
-    base_force_est_local = pred_est[9:12] / 0.01
     base_force_err_l2 = float(np.linalg.norm(base_force_est_local - base_force_tgt_local))
     gripper_force_err_l2 = float(np.linalg.norm(gripper_force_est_local - gripper_force_tgt_local))
     return {
