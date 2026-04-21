@@ -55,6 +55,10 @@ BASE_FORCE_KD = 100.0
 LIN_VEL_X_CLIP = 0.1
 LIN_VEL_Y_CLIP = 0.1
 ANG_VEL_YAW_CLIP = 0.2
+BRAKE_GATE_FORCE_X_THRESHOLD_N = -32.0
+BRAKE_GATE_MIN_CMD_VX = 0.2
+BRAKE_GATE_MAX_CMD_WZ = 0.10
+BRAKE_GATE_HOLD_STEPS = 2
 
 FORCE_SCHEDULE_NONE = "none"
 FORCE_SCHEDULE_DEMO = "demo"
@@ -79,6 +83,13 @@ MODE_NAME_BY_ID = {
     MODE_COMMAND_WALKING: "command_walking",
 }
 
+BRAKE_GATE_ELIGIBLE_PHASES = frozenset(
+    {
+        "walk_backward_pull",
+        "walk_backward_ramp",
+    }
+)
+
 STOP_GO_PHASE_IDLE = "idle"
 STOP_GO_PHASE_PRE_TENSION = "pre_tension"
 STOP_GO_PHASE_START_PULL = "start_pull"
@@ -95,6 +106,16 @@ HUMAN_GUIDE_PHASE_BACKWARD_PULL = "backward_pull"
 HUMAN_GUIDE_PHASE_LEFT_TURN = "left_turn"
 HUMAN_GUIDE_PHASE_LEFT_PULL = "left_pull"
 HUMAN_GUIDE_PHASE_TAIL = "tail_idle"
+HUMAN_GUIDE_PHASE_WALK_CMD_FORWARD = "walk_cmd_forward"
+HUMAN_GUIDE_PHASE_WALK_CMD_GAP = "walk_cmd_gap"
+HUMAN_GUIDE_PHASE_WALK_BACKWARD_PULL = "walk_backward_pull"
+HUMAN_GUIDE_PHASE_WALK_BACKWARD_RAMP = "walk_backward_ramp"
+HUMAN_GUIDE_PHASE_WALK_RIGHT_TURN = "walk_right_turn"
+HUMAN_GUIDE_PHASE_WALK_RIGHT_PULL_HIGH = "walk_right_pull_high"
+HUMAN_GUIDE_PHASE_WALK_RIGHT_PULL_SETTLE = "walk_right_pull_settle"
+HUMAN_GUIDE_PHASE_WALK_LEFT_TURN = "walk_left_turn"
+HUMAN_GUIDE_PHASE_WALK_LEFT_PULL_HIGH = "walk_left_pull_high"
+HUMAN_GUIDE_PHASE_WALK_LEFT_PULL_SETTLE = "walk_left_pull_settle"
 
 STOP_GO_HEADING_TOKEN_TO_DEG = {
     "forward": 0.0,
@@ -117,6 +138,132 @@ STOP_GO_HEADING_TOKEN_TO_DEG = {
     "bl": 135.0,
     "back_right": -135.0,
     "br": -135.0,
+}
+
+GATE_PRESET_LEGACY = "legacy"
+GATE_PRESET_BALANCED = "balanced"
+GATE_PRESET_ROBUST = "robust"
+GATE_PRESET_V1 = "v1"
+GATE_PRESET_V1_ROBUST = "v1_robust"
+GATE_PRESET_V1_TURNING = "v1_turning"
+GATE_PRESET_V1_ROBUST_TURNING = "v1_robust_turning"
+
+GATE_PRESET_OVERRIDES = {
+    GATE_PRESET_LEGACY: {},
+    GATE_PRESET_BALANCED: {
+        "baseline_tau_s": 1.5,
+        "baseline_margin_n": 0.25,
+        "baseline_update_max_n": 0.8,
+        "enter_threshold_n": 2.0,
+        "exit_threshold_n": 0.25,
+        "enter_tau_on_s": 0.16,
+        "enter_tau_off_s": 0.25,
+        "exit_tau_on_s": 0.06,
+        "exit_tau_off_s": 0.10,
+        "enter_score_threshold": 0.80,
+        "exit_score_threshold": 0.50,
+        "dir_consistency_min_force_n": 0.5,
+        "dir_consistency_tau_s": 0.10,
+        "dir_consistency_threshold": 0.65,
+        "switch_cooldown_s": 1.0,
+        "enter_hold_s": 0.08,
+        "exit_hold_s": 0.04,
+    },
+    GATE_PRESET_ROBUST: {
+        "baseline_tau_s": 1.0,
+        "baseline_margin_n": 0.35,
+        "baseline_update_max_n": 1.2,
+        "enter_threshold_n": 2.4,
+        "exit_threshold_n": 0.15,
+        "enter_tau_on_s": 0.08,
+        "enter_tau_off_s": 0.25,
+        "exit_tau_on_s": 0.04,
+        "exit_tau_off_s": 0.10,
+        "enter_score_threshold": 0.90,
+        "exit_score_threshold": 0.60,
+        "dir_consistency_min_force_n": 1.0,
+        "dir_consistency_tau_s": 0.20,
+        "dir_consistency_threshold": 0.65,
+        "switch_cooldown_s": 1.2,
+        "enter_hold_s": 0.08,
+        "exit_hold_s": 0.04,
+    },
+    GATE_PRESET_V1: {
+        "baseline_tau_s": 1.0,
+        "baseline_margin_n": 0.34,
+        "baseline_update_max_n": 1.00,
+        "enter_threshold_n": 2.30,
+        "exit_threshold_n": 0.15,
+        "enter_tau_on_s": 0.08,
+        "enter_tau_off_s": 0.22,
+        "exit_tau_on_s": 0.04,
+        "exit_tau_off_s": 0.10,
+        "enter_score_threshold": 0.90,
+        "exit_score_threshold": 0.60,
+        "dir_consistency_min_force_n": 1.00,
+        "dir_consistency_tau_s": 0.16,
+        "dir_consistency_threshold": 0.72,
+        "switch_cooldown_s": 1.00,
+        "enter_hold_s": 0.08,
+        "exit_hold_s": 0.04,
+    },
+    GATE_PRESET_V1_ROBUST: {
+        "baseline_tau_s": 1.0,
+        "baseline_margin_n": 0.35,
+        "baseline_update_max_n": 1.15,
+        "enter_threshold_n": 2.40,
+        "exit_threshold_n": 0.15,
+        "enter_tau_on_s": 0.08,
+        "enter_tau_off_s": 0.25,
+        "exit_tau_on_s": 0.04,
+        "exit_tau_off_s": 0.10,
+        "enter_score_threshold": 0.92,
+        "exit_score_threshold": 0.60,
+        "dir_consistency_min_force_n": 1.05,
+        "dir_consistency_tau_s": 0.18,
+        "dir_consistency_threshold": 0.74,
+        "switch_cooldown_s": 1.10,
+        "enter_hold_s": 0.08,
+        "exit_hold_s": 0.04,
+    },
+    GATE_PRESET_V1_TURNING: {
+        "baseline_tau_s": 1.2,
+        "baseline_margin_n": 0.22,
+        "baseline_update_max_n": 0.90,
+        "enter_threshold_n": 1.90,
+        "exit_threshold_n": 0.18,
+        "enter_tau_on_s": 0.10,
+        "enter_tau_off_s": 0.22,
+        "exit_tau_on_s": 0.05,
+        "exit_tau_off_s": 0.09,
+        "enter_score_threshold": 0.78,
+        "exit_score_threshold": 0.55,
+        "dir_consistency_min_force_n": 0.75,
+        "dir_consistency_tau_s": 0.14,
+        "dir_consistency_threshold": 0.60,
+        "switch_cooldown_s": 0.90,
+        "enter_hold_s": 0.06,
+        "exit_hold_s": 0.04,
+    },
+    GATE_PRESET_V1_ROBUST_TURNING: {
+        "baseline_tau_s": 1.3,
+        "baseline_margin_n": 0.25,
+        "baseline_update_max_n": 1.00,
+        "enter_threshold_n": 2.10,
+        "exit_threshold_n": 0.18,
+        "enter_tau_on_s": 0.12,
+        "enter_tau_off_s": 0.24,
+        "exit_tau_on_s": 0.05,
+        "exit_tau_off_s": 0.10,
+        "enter_score_threshold": 0.82,
+        "exit_score_threshold": 0.58,
+        "dir_consistency_min_force_n": 0.80,
+        "dir_consistency_tau_s": 0.16,
+        "dir_consistency_threshold": 0.62,
+        "switch_cooldown_s": 1.00,
+        "enter_hold_s": 0.06,
+        "exit_hold_s": 0.04,
+    },
 }
 
 
@@ -177,6 +324,18 @@ class ForceGuidanceState:
     motion_sign: float
 
 
+@dataclass
+class BrakeGateState:
+    enabled: bool
+    eligible: bool
+    active: bool
+    hold_counter: int
+    est_force_x_n: float
+    est_force_y_n: float
+    threshold_x_n: float
+    blocked_phase_name: str | None
+
+
 @dataclass(frozen=True)
 class HumanGuideLegProfile:
     force_freq_hz: tuple[float, float]
@@ -224,6 +383,13 @@ def mode_name(mode_id: int) -> str:
 def smoothstep01(value: float) -> float:
     clamped = max(0.0, min(float(value), 1.0))
     return clamped * clamped * (3.0 - 2.0 * clamped)
+
+
+def smooth_bump01(value: float) -> float:
+    clamped = max(0.0, min(float(value), 1.0))
+    if clamped <= 0.5:
+        return smoothstep01(clamped / 0.5)
+    return smoothstep01((1.0 - clamped) / 0.5)
 
 
 def lerp_scalar(start: float, end: float, ratio: float) -> float:
@@ -534,6 +700,14 @@ class HumanGuideForceScheduler:
         HUMAN_GUIDE_PHASE_BACKWARD_PULL,
         HUMAN_GUIDE_PHASE_LEFT_TURN,
         HUMAN_GUIDE_PHASE_LEFT_PULL,
+        HUMAN_GUIDE_PHASE_WALK_BACKWARD_PULL,
+        HUMAN_GUIDE_PHASE_WALK_BACKWARD_RAMP,
+        HUMAN_GUIDE_PHASE_WALK_RIGHT_TURN,
+        HUMAN_GUIDE_PHASE_WALK_RIGHT_PULL_HIGH,
+        HUMAN_GUIDE_PHASE_WALK_RIGHT_PULL_SETTLE,
+        HUMAN_GUIDE_PHASE_WALK_LEFT_TURN,
+        HUMAN_GUIDE_PHASE_WALK_LEFT_PULL_HIGH,
+        HUMAN_GUIDE_PHASE_WALK_LEFT_PULL_SETTLE,
     }
     _PHASE_TO_BLOCK_IDX = {
         HUMAN_GUIDE_PHASE_FORWARD_PULL: 0,
@@ -542,15 +716,31 @@ class HumanGuideForceScheduler:
         HUMAN_GUIDE_PHASE_BACKWARD_PULL: 1,
         HUMAN_GUIDE_PHASE_LEFT_TURN: 1,
         HUMAN_GUIDE_PHASE_LEFT_PULL: 1,
+        HUMAN_GUIDE_PHASE_WALK_BACKWARD_PULL: 2,
+        HUMAN_GUIDE_PHASE_WALK_BACKWARD_RAMP: 2,
+        HUMAN_GUIDE_PHASE_WALK_RIGHT_TURN: 2,
+        HUMAN_GUIDE_PHASE_WALK_RIGHT_PULL_HIGH: 2,
+        HUMAN_GUIDE_PHASE_WALK_RIGHT_PULL_SETTLE: 2,
+        HUMAN_GUIDE_PHASE_WALK_LEFT_TURN: 2,
+        HUMAN_GUIDE_PHASE_WALK_LEFT_PULL_HIGH: 2,
+        HUMAN_GUIDE_PHASE_WALK_LEFT_PULL_SETTLE: 2,
     }
     _BLOCK_SEGMENT_NAMES = {
         0: "human_guide_block_00",
         1: "human_guide_block_01",
+        2: "human_guide_block_02",
     }
+    _TAIL_FORWARD_CMD_VX = 0.80
+    _TAIL_TURN_RATE_RAD_S = math.radians(18.0)
+    _TAIL_FORCE_HEADING_LAG_S = 0.45
+    _TAIL_FORCE_LOW_N = 15.0
+    _TAIL_FORCE_MID_N = 30.0
+    _TAIL_FORCE_HIGH_N = 40.0
 
     def __init__(self, args: argparse.Namespace, *, control_dt: float):
         self.args = args
         self.control_dt = float(control_dt)
+        self.default_cmd_vel_b = np.array([float(args.cmd_vx), float(args.cmd_vy), float(args.cmd_wz)], dtype=np.float32)
 
         self.straight_s = max(float(args.human_guide_straight_s), 0.0)
         self.turn_s = max(float(args.human_guide_turn_s), 0.0)
@@ -575,7 +765,7 @@ class HumanGuideForceScheduler:
         self.reference_forward_xy = np.array([1.0, 0.0], dtype=np.float32)
         self.captured_block_idx = -1
 
-        self.phase_durations = (
+        core_phase_durations = [
             (HUMAN_GUIDE_PHASE_FORWARD_PULL, self.straight_s),
             (HUMAN_GUIDE_PHASE_RIGHT_TURN, self.turn_s),
             (HUMAN_GUIDE_PHASE_RIGHT_PULL, self.straight_s),
@@ -583,7 +773,51 @@ class HumanGuideForceScheduler:
             (HUMAN_GUIDE_PHASE_BACKWARD_PULL, self.straight_s),
             (HUMAN_GUIDE_PHASE_LEFT_TURN, self.turn_s),
             (HUMAN_GUIDE_PHASE_LEFT_PULL, self.straight_s),
+        ]
+        self.core_duration_s = sum(duration_s for _, duration_s in core_phase_durations)
+
+        self.walk_tail_cmd_start_s = max(self.core_duration_s + 5.0, 33.0)
+        self.walk_tail_force_start_s = max(self.core_duration_s + 7.0, 35.0)
+        self.walk_tail_pre_idle_s = max(self.walk_tail_force_start_s - self.core_duration_s, 0.0)
+        self.walk_tail_backward_pull_s = 3.0
+        self.walk_tail_backward_ramp_s = 2.0
+        self.walk_tail_turn_s = 5.0
+        self.walk_tail_high_force_s = 3.0
+        self.walk_tail_final_bump_s = 5.0
+        self.walk_tail_settle_s = 0.0
+        tail_force_end_s = (
+            self.walk_tail_force_start_s
+            + self.walk_tail_backward_pull_s
+            + self.walk_tail_backward_ramp_s
+            + self.walk_tail_turn_s
+            + self.walk_tail_high_force_s
+            + self.walk_tail_settle_s
+            + self.walk_tail_turn_s
+            + self.walk_tail_final_bump_s
         )
+        self.walk_tail_final_hold_s = max(float(args.duration_s) - tail_force_end_s, 0.0)
+
+        self.walk_tail_ramp_start_s = self.walk_tail_force_start_s + self.walk_tail_backward_pull_s
+        self.walk_tail_right_turn_start_s = self.walk_tail_ramp_start_s + self.walk_tail_backward_ramp_s
+        self.walk_tail_right_turn_end_s = self.walk_tail_right_turn_start_s + self.walk_tail_turn_s
+        self.walk_tail_right_high_start_s = self.walk_tail_right_turn_end_s
+        self.walk_tail_right_high_end_s = self.walk_tail_right_high_start_s + self.walk_tail_high_force_s
+        self.walk_tail_left_turn_start_s = self.walk_tail_right_high_end_s + self.walk_tail_settle_s
+        self.walk_tail_left_turn_end_s = self.walk_tail_left_turn_start_s + self.walk_tail_turn_s
+        self.walk_tail_left_high_start_s = self.walk_tail_left_turn_end_s
+        self.walk_tail_left_high_end_s = self.walk_tail_left_high_start_s + self.walk_tail_final_bump_s
+
+        phase_durations: list[tuple[str, float]] = list(core_phase_durations)
+        self._append_phase(phase_durations, HUMAN_GUIDE_PHASE_TAIL, self.walk_tail_pre_idle_s)
+        self._append_phase(phase_durations, HUMAN_GUIDE_PHASE_WALK_BACKWARD_PULL, self.walk_tail_backward_pull_s)
+        self._append_phase(phase_durations, HUMAN_GUIDE_PHASE_WALK_BACKWARD_RAMP, self.walk_tail_backward_ramp_s)
+        self._append_phase(phase_durations, HUMAN_GUIDE_PHASE_WALK_RIGHT_TURN, self.walk_tail_turn_s)
+        self._append_phase(phase_durations, HUMAN_GUIDE_PHASE_WALK_RIGHT_PULL_HIGH, self.walk_tail_high_force_s)
+        self._append_phase(phase_durations, HUMAN_GUIDE_PHASE_WALK_RIGHT_PULL_SETTLE, self.walk_tail_settle_s)
+        self._append_phase(phase_durations, HUMAN_GUIDE_PHASE_WALK_LEFT_TURN, self.walk_tail_turn_s)
+        self._append_phase(phase_durations, HUMAN_GUIDE_PHASE_WALK_LEFT_PULL_HIGH, self.walk_tail_final_bump_s)
+        self._append_phase(phase_durations, HUMAN_GUIDE_PHASE_WALK_LEFT_PULL_SETTLE, self.walk_tail_final_hold_s)
+        self.phase_durations = tuple(phase_durations)
         self.total_duration_s = sum(duration_s for _, duration_s in self.phase_durations)
 
         self.leg_profiles = {
@@ -596,6 +830,23 @@ class HumanGuideForceScheduler:
             HUMAN_GUIDE_PHASE_RIGHT_TURN: self._build_turn_profile(seed_offset=71),
             HUMAN_GUIDE_PHASE_LEFT_TURN: self._build_turn_profile(seed_offset=89),
         }
+        self.walk_backward_profile = self._build_leg_profile(
+            seed_offset=101,
+            phase_duration_s=self.walk_tail_backward_pull_s + self.walk_tail_backward_ramp_s,
+        )
+        self.walk_right_profile = self._build_leg_profile(
+            seed_offset=131,
+            phase_duration_s=self.walk_tail_turn_s + self.walk_tail_high_force_s + self.walk_tail_settle_s,
+        )
+        self.walk_left_profile = self._build_leg_profile(
+            seed_offset=149,
+            phase_duration_s=self.walk_tail_turn_s + self.walk_tail_final_bump_s + max(self.walk_tail_final_hold_s, 2.0),
+        )
+
+    @staticmethod
+    def _append_phase(phase_durations: list[tuple[str, float]], phase_name: str, duration_s: float) -> None:
+        if duration_s > 1.0e-6:
+            phase_durations.append((phase_name, float(duration_s)))
 
     def update(self, base_quat_wxyz: np.ndarray, time_s: float) -> dict[str, object]:
         phase_name, phase_elapsed_s, phase_duration_s = self._phase_info(time_s)
@@ -604,6 +855,17 @@ class HumanGuideForceScheduler:
         if block_idx is not None and block_idx != self.captured_block_idx:
             self.reference_forward_xy = base_forward_axis_xy(base_quat_wxyz)
             heading_start_deg = self._nominal_heading_deg_for_phase(phase_name, phase_elapsed_s, phase_duration_s)
+            if phase_name in {
+                HUMAN_GUIDE_PHASE_WALK_BACKWARD_PULL,
+                HUMAN_GUIDE_PHASE_WALK_BACKWARD_RAMP,
+                HUMAN_GUIDE_PHASE_WALK_RIGHT_TURN,
+                HUMAN_GUIDE_PHASE_WALK_RIGHT_PULL_HIGH,
+                HUMAN_GUIDE_PHASE_WALK_RIGHT_PULL_SETTLE,
+                HUMAN_GUIDE_PHASE_WALK_LEFT_TURN,
+                HUMAN_GUIDE_PHASE_WALK_LEFT_PULL_HIGH,
+                HUMAN_GUIDE_PHASE_WALK_LEFT_PULL_SETTLE,
+            }:
+                heading_start_deg = self._walk_tail_heading_deg(time_s)
             self.heading_state = math.radians(heading_start_deg)
             self.captured_block_idx = block_idx
 
@@ -611,6 +873,7 @@ class HumanGuideForceScheduler:
             phase_name,
             phase_elapsed_s,
             phase_duration_s,
+            time_s=time_s,
         )
         self.mag_state = self.mag_state + self.mag_alpha * (scheduled_force_target_n - self.mag_state)
         if heading_target_rad is not None:
@@ -638,6 +901,7 @@ class HumanGuideForceScheduler:
             "force_w": force_w,
             "axis_xy": axis_xy,
             "is_active": bool(is_active),
+            "nominal_cmd_vel_b": self._nominal_command_for_time(time_s),
         }
 
     def _phase_info(self, time_s: float) -> tuple[str, float, float]:
@@ -653,11 +917,20 @@ class HumanGuideForceScheduler:
         block_idx = self._PHASE_TO_BLOCK_IDX.get(phase_name, None)
         if block_idx is not None:
             return self._BLOCK_SEGMENT_NAMES[block_idx]
+        if phase_name in {HUMAN_GUIDE_PHASE_WALK_CMD_FORWARD, HUMAN_GUIDE_PHASE_WALK_CMD_GAP}:
+            return "human_guide_walk_cmd"
         if phase_name == HUMAN_GUIDE_PHASE_GAP:
             return "human_guide_gap"
         return "human_guide_tail"
 
-    def _targets_for_phase(self, phase_name: str, phase_elapsed_s: float, phase_duration_s: float) -> tuple[float, float | None]:
+    def _targets_for_phase(
+        self,
+        phase_name: str,
+        phase_elapsed_s: float,
+        phase_duration_s: float,
+        *,
+        time_s: float,
+    ) -> tuple[float, float | None]:
         if phase_name in self.leg_profiles:
             profile = self.leg_profiles[phase_name]
             force_target_n = self._straight_force_target(profile, phase_elapsed_s)
@@ -683,10 +956,35 @@ class HumanGuideForceScheduler:
             )
             return force_target_n, math.radians(heading_target_deg)
 
+        if phase_name in {
+            HUMAN_GUIDE_PHASE_WALK_BACKWARD_PULL,
+            HUMAN_GUIDE_PHASE_WALK_BACKWARD_RAMP,
+            HUMAN_GUIDE_PHASE_WALK_RIGHT_TURN,
+            HUMAN_GUIDE_PHASE_WALK_RIGHT_PULL_HIGH,
+            HUMAN_GUIDE_PHASE_WALK_RIGHT_PULL_SETTLE,
+            HUMAN_GUIDE_PHASE_WALK_LEFT_TURN,
+            HUMAN_GUIDE_PHASE_WALK_LEFT_PULL_HIGH,
+            HUMAN_GUIDE_PHASE_WALK_LEFT_PULL_SETTLE,
+        }:
+            profile, stage_elapsed_s = self._walk_tail_profile_and_elapsed(phase_name, time_s)
+            base_force_n = self._walk_tail_base_force_n(time_s)
+            force_target_n = self._profile_force_target(profile, stage_elapsed_s, base_force_n=base_force_n)
+            heading_target_deg = self._walk_tail_heading_deg(time_s)
+            heading_target_deg += math.degrees(self.heading_jitter_rad) * self._profile_wave(
+                stage_elapsed_s,
+                profile.heading_freq_hz,
+                profile.heading_phase_rad,
+                profile.heading_weight,
+            )
+            return force_target_n, math.radians(heading_target_deg)
+
         return 0.0, None
 
     def _straight_force_target(self, profile: HumanGuideLegProfile, elapsed_s: float) -> float:
-        force_target_n = self.base_force_n + self.force_jitter_n * self._profile_wave(
+        return self._profile_force_target(profile, elapsed_s, base_force_n=self.base_force_n)
+
+    def _profile_force_target(self, profile: HumanGuideLegProfile, elapsed_s: float, *, base_force_n: float) -> float:
+        force_target_n = base_force_n + self.force_jitter_n * self._profile_wave(
             elapsed_s,
             profile.force_freq_hz,
             profile.force_phase_rad,
@@ -698,6 +996,19 @@ class HumanGuideForceScheduler:
             profile.dropout_start_s,
             profile.dropout_duration_s,
         )
+
+    def _nominal_command_for_time(self, time_s: float) -> np.ndarray:
+        if float(time_s) < self.walk_tail_cmd_start_s:
+            return self.default_cmd_vel_b.astype(np.float32, copy=True)
+        if float(time_s) >= self.walk_tail_left_high_end_s:
+            return np.zeros(3, dtype=np.float32)
+
+        command = np.array([self._TAIL_FORWARD_CMD_VX, 0.0, 0.0], dtype=np.float32)
+        if self.walk_tail_right_turn_start_s <= float(time_s) < self.walk_tail_right_turn_end_s:
+            command[2] = -self._TAIL_TURN_RATE_RAD_S
+        elif self.walk_tail_left_turn_start_s <= float(time_s) < self.walk_tail_left_turn_end_s:
+            command[2] = self._TAIL_TURN_RATE_RAD_S
+        return command
 
     def _nominal_heading_deg_for_phase(self, phase_name: str, phase_elapsed_s: float, phase_duration_s: float) -> float:
         progress = phase_elapsed_s / max(phase_duration_s, 1.0e-6)
@@ -729,17 +1040,71 @@ class HumanGuideForceScheduler:
         )
         return max(-1.0, min(1.0, value))
 
-    def _build_leg_profile(self, seed_offset: int) -> HumanGuideLegProfile:
+    def _walk_tail_profile_and_elapsed(self, phase_name: str, time_s: float) -> tuple[HumanGuideLegProfile, float]:
+        if phase_name in {HUMAN_GUIDE_PHASE_WALK_BACKWARD_PULL, HUMAN_GUIDE_PHASE_WALK_BACKWARD_RAMP}:
+            return self.walk_backward_profile, max(float(time_s) - self.walk_tail_force_start_s, 0.0)
+        if phase_name in {
+            HUMAN_GUIDE_PHASE_WALK_RIGHT_TURN,
+            HUMAN_GUIDE_PHASE_WALK_RIGHT_PULL_HIGH,
+            HUMAN_GUIDE_PHASE_WALK_RIGHT_PULL_SETTLE,
+        }:
+            return self.walk_right_profile, max(float(time_s) - self.walk_tail_right_turn_start_s, 0.0)
+        return self.walk_left_profile, max(float(time_s) - self.walk_tail_left_turn_start_s, 0.0)
+
+    def _walk_tail_base_force_n(self, time_s: float) -> float:
+        if float(time_s) < self.walk_tail_force_start_s:
+            return 0.0
+        if float(time_s) < self.walk_tail_ramp_start_s:
+            return self._TAIL_FORCE_LOW_N
+        if float(time_s) < self.walk_tail_right_turn_start_s:
+            progress = (float(time_s) - self.walk_tail_ramp_start_s) / max(self.walk_tail_backward_ramp_s, 1.0e-6)
+            return lerp_scalar(self._TAIL_FORCE_LOW_N, self._TAIL_FORCE_MID_N, smoothstep01(progress))
+        if float(time_s) < self.walk_tail_right_high_start_s:
+            return self._TAIL_FORCE_MID_N
+        if float(time_s) < self.walk_tail_right_high_end_s:
+            progress = (float(time_s) - self.walk_tail_right_high_start_s) / max(self.walk_tail_high_force_s, 1.0e-6)
+            return self._TAIL_FORCE_MID_N + (self._TAIL_FORCE_HIGH_N - self._TAIL_FORCE_MID_N) * smooth_bump01(progress)
+        if float(time_s) < self.walk_tail_left_turn_start_s:
+            return self._TAIL_FORCE_MID_N
+        if float(time_s) < self.walk_tail_left_high_start_s:
+            return self._TAIL_FORCE_MID_N
+        if float(time_s) < self.walk_tail_left_high_end_s:
+            bump_duration_s = min(self.walk_tail_high_force_s, self.walk_tail_final_bump_s)
+            bump_end_s = self.walk_tail_left_high_start_s + bump_duration_s
+            if float(time_s) < bump_end_s:
+                progress = (float(time_s) - self.walk_tail_left_high_start_s) / max(bump_duration_s, 1.0e-6)
+                return self._TAIL_FORCE_MID_N + (self._TAIL_FORCE_HIGH_N - self._TAIL_FORCE_MID_N) * smooth_bump01(progress)
+            decay_duration_s = max(self.walk_tail_final_bump_s - bump_duration_s, 1.0e-6)
+            progress = (float(time_s) - bump_end_s) / decay_duration_s
+            return lerp_scalar(self._TAIL_FORCE_MID_N, 0.0, smoothstep01(progress))
+        return 0.0
+
+    def _walk_tail_heading_deg(self, time_s: float) -> float:
+        delayed_time_s = float(time_s) - self._TAIL_FORCE_HEADING_LAG_S
+        if delayed_time_s < self.walk_tail_right_turn_start_s:
+            return 180.0
+        if delayed_time_s < self.walk_tail_right_turn_end_s:
+            progress = (delayed_time_s - self.walk_tail_right_turn_start_s) / max(self.walk_tail_turn_s, 1.0e-6)
+            return lerp_scalar(180.0, 90.0, smoothstep01(progress))
+        if delayed_time_s < self.walk_tail_left_turn_start_s:
+            return 90.0
+        if delayed_time_s < self.walk_tail_left_turn_end_s:
+            progress = (delayed_time_s - self.walk_tail_left_turn_start_s) / max(self.walk_tail_turn_s, 1.0e-6)
+            return lerp_scalar(90.0, 180.0, smoothstep01(progress))
+        return 180.0
+
+    def _build_leg_profile(self, seed_offset: int, *, phase_duration_s: float | None = None) -> HumanGuideLegProfile:
         rng = np.random.default_rng(int(self.args.seed) + int(seed_offset))
-        boundary_margin_s = min(max(0.65, 0.16 * self.straight_s), 0.30 * self.straight_s)
-        max_dropout_s = min(self.dropout_max_s, max(self.straight_s - (2.0 * boundary_margin_s), 0.0))
+        duration_s = self.straight_s if phase_duration_s is None else max(float(phase_duration_s), 0.0)
+        boundary_margin_s = min(max(0.65, 0.16 * duration_s), 0.30 * duration_s)
+        max_dropout_s = min(self.dropout_max_s, max(duration_s - (2.0 * boundary_margin_s), 0.0))
         if max_dropout_s <= 1.0e-6:
             dropout_start_s = 0.0
             dropout_duration_s = 0.0
         else:
             min_dropout_s = min(0.12, max_dropout_s)
             dropout_duration_s = self._sample_uniform(rng, min_dropout_s, max_dropout_s)
-            start_hi_s = self.straight_s - boundary_margin_s - dropout_duration_s
+            start_hi_s = duration_s - boundary_margin_s - dropout_duration_s
             if start_hi_s <= boundary_margin_s:
                 dropout_start_s = 0.0
                 dropout_duration_s = 0.0
@@ -1048,6 +1413,76 @@ class ForceGuidedTurningController:
         )
 
 
+class BrakeCommandGate:
+    def __init__(self, args: argparse.Namespace):
+        self.enabled = bool(args.brake_gate)
+        self.force_x_threshold_n = float(args.brake_gate_force_x_threshold_n)
+        self.min_cmd_vx = max(float(args.brake_gate_min_cmd_vx), 0.0)
+        self.max_cmd_wz = max(float(args.brake_gate_max_cmd_wz), 0.0)
+        self.lin_vel_x_clip = float(args.lin_vel_x_clip)
+        self.lin_vel_y_clip = float(args.lin_vel_y_clip)
+        self.ang_vel_yaw_clip = float(args.ang_vel_yaw_clip)
+        self.hold_steps = max(int(args.brake_gate_hold_steps), 1)
+        self.hold_counter = 0
+        self.blocked_phase_name: str | None = None
+
+    def _command_nonzero(self, cmd_vel_b: np.ndarray) -> bool:
+        return not (
+            abs(float(cmd_vel_b[0])) < self.lin_vel_x_clip
+            and abs(float(cmd_vel_b[1])) < self.lin_vel_y_clip
+            and abs(float(cmd_vel_b[2])) < self.ang_vel_yaw_clip
+        )
+
+    def update(
+        self,
+        cmd_vel_b: np.ndarray,
+        base_force_est_local: np.ndarray,
+        *,
+        phase_name: str,
+    ) -> BrakeGateState:
+        if self.blocked_phase_name is not None and phase_name != self.blocked_phase_name:
+            self.blocked_phase_name = None
+            self.hold_counter = 0
+
+        est_force_x_n = float(base_force_est_local[0])
+        est_force_y_n = float(base_force_est_local[1])
+        if not math.isfinite(est_force_x_n):
+            est_force_x_n = 0.0
+        if not math.isfinite(est_force_y_n):
+            est_force_y_n = 0.0
+
+        latched_phase_active = self.blocked_phase_name == phase_name
+        eligible = bool(
+            self.enabled
+            and self._command_nonzero(cmd_vel_b)
+            and float(cmd_vel_b[0]) >= self.min_cmd_vx
+            and abs(float(cmd_vel_b[2])) <= self.max_cmd_wz
+            and phase_name in BRAKE_GATE_ELIGIBLE_PHASES
+        )
+        trigger_sample = bool((not latched_phase_active) and eligible and est_force_x_n <= self.force_x_threshold_n)
+        if latched_phase_active:
+            active = True
+        else:
+            if trigger_sample:
+                self.hold_counter = min(self.hold_counter + 1, self.hold_steps)
+            else:
+                self.hold_counter = 0
+            active = bool(eligible and self.hold_counter >= self.hold_steps)
+            if active:
+                self.blocked_phase_name = phase_name
+
+        return BrakeGateState(
+            enabled=self.enabled,
+            eligible=eligible,
+            active=active,
+            hold_counter=self.hold_counter,
+            est_force_x_n=est_force_x_n,
+            est_force_y_n=est_force_y_n,
+            threshold_x_n=self.force_x_threshold_n,
+            blocked_phase_name=self.blocked_phase_name,
+        )
+
+
 class SmartGaitPhaseClock:
     def __init__(self, gait_frequency_hz: float):
         self.gait_frequency_hz = float(gait_frequency_hz)
@@ -1114,11 +1549,14 @@ def write_csv_row(
     step: int,
     time_s: float,
     nominal_cmd_vel_b: np.ndarray,
+    pre_brake_cmd_vel_b: np.ndarray,
     effective_cmd_vel_b: np.ndarray,
+    applied_force_target_n: float,
     base_lin_vel_local: np.ndarray,
     estimator_outputs: dict[str, np.ndarray | float],
     mode_state: ForceModeSwitchState,
     guidance_state: ForceGuidanceState,
+    brake_state: BrakeGateState,
     gait_phase: float,
     force_segment_name: str,
     force_direction_name: str,
@@ -1149,6 +1587,7 @@ def write_csv_row(
             force_phase_name,
             f"{force_schedule_target_n:.6f}",
             f"{force_target_n:.6f}",
+            f"{applied_force_target_n:.6f}",
             f"{base_force_est_local[0]:.6f}",
             f"{base_force_est_local[1]:.6f}",
             f"{base_force_est_local[2]:.6f}",
@@ -1172,6 +1611,17 @@ def write_csv_row(
             f"{gait_phase:.6f}",
             int(guidance_state.enabled),
             int(guidance_state.active),
+            int(brake_state.enabled),
+            int(brake_state.eligible),
+            int(brake_state.active),
+            brake_state.hold_counter,
+            f"{brake_state.threshold_x_n:.6f}",
+            f"{brake_state.est_force_x_n:.6f}",
+            f"{brake_state.est_force_y_n:.6f}",
+            brake_state.blocked_phase_name or "",
+            f"{pre_brake_cmd_vel_b[0]:.6f}",
+            f"{pre_brake_cmd_vel_b[1]:.6f}",
+            f"{pre_brake_cmd_vel_b[2]:.6f}",
             f"{effective_cmd_vel_b[0]:.6f}",
             f"{effective_cmd_vel_b[1]:.6f}",
             f"{effective_cmd_vel_b[2]:.6f}",
@@ -1191,9 +1641,12 @@ def maybe_log_step(
     step: int,
     time_s: float,
     nominal_cmd_vel_b: np.ndarray,
+    pre_brake_cmd_vel_b: np.ndarray,
     effective_cmd_vel_b: np.ndarray,
+    applied_force_target_n: float,
     mode_state: ForceModeSwitchState,
     guidance_state: ForceGuidanceState,
+    brake_state: BrakeGateState,
     gait_phase: float,
     force_segment_name: str,
     force_direction_name: str,
@@ -1209,7 +1662,13 @@ def maybe_log_step(
         f"command_zero={mode_state.command_zero} "
         f"standing_mask={mode_state.standing_mask} "
         f"cmd=({nominal_cmd_vel_b[0]:+.3f}, {nominal_cmd_vel_b[1]:+.3f}, {nominal_cmd_vel_b[2]:+.3f}) "
+        f"pre_brake=({pre_brake_cmd_vel_b[0]:+.3f}, {pre_brake_cmd_vel_b[1]:+.3f}, {pre_brake_cmd_vel_b[2]:+.3f}) "
         f"eff_cmd=({effective_cmd_vel_b[0]:+.3f}, {effective_cmd_vel_b[1]:+.3f}, {effective_cmd_vel_b[2]:+.3f}) "
+        f"brake_active={brake_state.active} "
+        f"brake_phase={brake_state.blocked_phase_name or '-'} "
+        f"brake_hold={brake_state.hold_counter}/{max(int(args.brake_gate_hold_steps), 1)} "
+        f"brake_fx={brake_state.est_force_x_n:+.3f}N "
+        f"F_applied={applied_force_target_n:.3f}N "
         f"F_raw={mode_state.force_xy_raw:.3f}N "
         f"F_cap={mode_state.force_xy_cap:.3f}N "
         f"F_base={mode_state.force_baseline:.3f}N "
@@ -1224,6 +1683,15 @@ def maybe_log_step(
         f"guide_err={math.degrees(guidance_state.heading_error_rad):+.1f}deg "
         f"gait_phase={gait_phase:.3f}"
     )
+
+
+def apply_gate_preset(args: argparse.Namespace) -> argparse.Namespace:
+    preset_name = str(getattr(args, "gate_preset", GATE_PRESET_LEGACY))
+    if preset_name not in GATE_PRESET_OVERRIDES:
+        raise ValueError(f"Unsupported gate preset '{preset_name}'.")
+    for field_name, value in GATE_PRESET_OVERRIDES[preset_name].items():
+        setattr(args, field_name, value)
+    return args
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -1284,6 +1752,21 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--human-guide-heading-jitter-deg", type=float, default=12.0)
     parser.add_argument("--human-guide-dropout-max-s", type=float, default=0.35)
     parser.add_argument("--walking-gait-frequency", type=float, default=2.0)
+    parser.add_argument(
+        "--gate-preset",
+        type=str,
+        default=GATE_PRESET_LEGACY,
+        choices=(
+            GATE_PRESET_LEGACY,
+            GATE_PRESET_BALANCED,
+            GATE_PRESET_ROBUST,
+            GATE_PRESET_V1,
+            GATE_PRESET_V1_ROBUST,
+            GATE_PRESET_V1_TURNING,
+            GATE_PRESET_V1_ROBUST_TURNING,
+        ),
+        help="Optional standing/walking gate preset. Presets override the individual gate tuning flags.",
+    )
     parser.add_argument("--baseline-tau-s", type=float, default=2.0)
     parser.add_argument("--baseline-margin-n", type=float, default=0.15)
     parser.add_argument("--baseline-update-max-n", type=float, default=0.25)
@@ -1314,6 +1797,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--force-guided-full-speed-angle-deg", type=float, default=8.0)
     parser.add_argument("--force-guided-speed-scale", type=float, default=1.0)
     parser.add_argument("--force-guided-speed-max", type=float, default=0.35)
+    parser.add_argument("--brake-gate", action="store_true")
+    parser.add_argument("--brake-gate-force-x-threshold-n", type=float, default=BRAKE_GATE_FORCE_X_THRESHOLD_N)
+    parser.add_argument("--brake-gate-min-cmd-vx", type=float, default=BRAKE_GATE_MIN_CMD_VX)
+    parser.add_argument("--brake-gate-max-cmd-wz", type=float, default=BRAKE_GATE_MAX_CMD_WZ)
+    parser.add_argument("--brake-gate-hold-steps", type=int, default=BRAKE_GATE_HOLD_STEPS)
     parser.add_argument("--base-force-scale", type=float, default=BASE_FORCE_SCALE)
     parser.add_argument("--obs-delay-steps", type=int, default=0, choices=(0, 1, 2))
     parser.add_argument("--leg-action-delay-steps", type=int, default=0, choices=(0, 1))
@@ -1327,6 +1815,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
 def main() -> int:
     parser = build_arg_parser()
     args = parser.parse_args()
+    args = apply_gate_preset(args)
 
     if args.policy_history_length is not None and int(args.policy_history_length) <= 0:
         parser.error(f"--policy-history-length must be positive, got {args.policy_history_length}.")
@@ -1341,9 +1830,9 @@ def main() -> int:
         metadata = replace(metadata, history_length=int(args.policy_history_length))
     metadata = replace(metadata, gait_frequency_hz=float(args.walking_gait_frequency))
 
-    nominal_cmd_vel_b = np.array([float(args.cmd_vx), float(args.cmd_vy), float(args.cmd_wz)], dtype=np.float32)
+    base_nominal_cmd_vel_b = np.array([float(args.cmd_vx), float(args.cmd_vy), float(args.cmd_wz)], dtype=np.float32)
     initial_command_obs = build_command_vector(
-        locomotion_cmd=nominal_cmd_vel_b,
+        locomotion_cmd=base_nominal_cmd_vel_b,
         ee_sphere_cmd=metadata.default_ee_sphere_cmd,
         gripper_force_cmd=metadata.default_gripper_force_cmd,
         base_force_cmd=metadata.default_base_force_cmd,
@@ -1389,10 +1878,14 @@ def main() -> int:
 
     switcher = ForceModeSwitcher(args)
     guidance_controller = ForceGuidedTurningController(args)
+    brake_gate = BrakeCommandGate(args)
     mode_counts = np.zeros(3, dtype=np.int64)
+    last_nominal_cmd_vel_b = base_nominal_cmd_vel_b.astype(np.float32, copy=True)
+    last_external_force_w = np.zeros(3, dtype=np.float32)
 
     print(
         "[INFO] Runtime config: "
+        f"gate_preset={args.gate_preset} "
         f"history_length={metadata.history_length} "
         f"per_frame_obs_dim={metadata.per_frame_obs_dim} "
         f"action_dim={metadata.action_dim} "
@@ -1421,6 +1914,7 @@ def main() -> int:
         "force_phase_name",
         "scheduled_force_target_n",
         "force_target_n",
+        "applied_force_target_n",
         "base_force_est_local_x",
         "base_force_est_local_y",
         "base_force_est_local_z",
@@ -1444,6 +1938,17 @@ def main() -> int:
         "gait_phase",
         "force_guided_turning_enabled",
         "force_guided_turning_active",
+        "brake_gate_enabled",
+        "brake_gate_eligible",
+        "brake_gate_active",
+        "brake_gate_hold_counter",
+        "brake_gate_force_x_threshold_n",
+        "brake_gate_est_force_x_n",
+        "brake_gate_est_force_y_n",
+        "brake_gate_blocked_phase_name",
+        "pre_brake_cmd_vx",
+        "pre_brake_cmd_vy",
+        "pre_brake_cmd_wz",
         "effective_cmd_vx",
         "effective_cmd_vy",
         "effective_cmd_wz",
@@ -1456,6 +1961,7 @@ def main() -> int:
     ]
 
     def run_one_control_step(step: int, writer: csv.writer) -> None:
+        nonlocal last_external_force_w, last_nominal_cmd_vel_b
         time_s = step * float(metadata.control_dt)
         base_quat = data.qpos[3:7].astype(np.float64, copy=True)
         base_lin_vel_local = world_to_base_yaw(data.qvel[:3].astype(np.float64, copy=True), base_quat)
@@ -1476,10 +1982,11 @@ def main() -> int:
         else:
             scheduler_outputs = scheduler.update(base_quat, time_s)
 
-        if bool(scheduler_outputs["is_active"]):
-            set_body_force(data, trunk_body_id, np.asarray(scheduler_outputs["force_w"], dtype=np.float32))
-        else:
-            clear_body_forces(data)
+        nominal_cmd_vel_b = np.asarray(
+            scheduler_outputs.get("nominal_cmd_vel_b", base_nominal_cmd_vel_b),
+            dtype=np.float32,
+        )
+        scheduled_force_w = np.asarray(scheduler_outputs["force_w"], dtype=np.float32)
 
         obs = runtime_state.policy_obs()
         action, pred_est = infer_policy_outputs(policy, obs, action_dim=metadata.action_dim)
@@ -1490,25 +1997,54 @@ def main() -> int:
                 "Re-export the policy with scripts/mujoco/export_policy_wrapper.py."
             )
 
+        scheduled_force_tgt_local = world_to_base_yaw(
+            scheduled_force_w,
+            base_quat,
+        )
+        gate_estimator_outputs = extract_force_estimator_outputs(
+            pred_est.astype(np.float32),
+            scheduled_force_tgt_local.astype(np.float32),
+            base_force_scale=args.base_force_scale,
+        )
+
+        mode_state = switcher.update(
+            nominal_cmd_vel_b,
+            np.asarray(gate_estimator_outputs["base_force_est_local"], dtype=np.float32),
+            dt=metadata.control_dt,
+        )
+        guidance_state = guidance_controller.compute(
+            nominal_cmd_vel_b,
+            np.asarray(gate_estimator_outputs["base_force_est_local"], dtype=np.float32),
+            mode_state,
+        )
+        pre_brake_cmd_vel_b = guidance_state.effective_cmd_vel_b.astype(np.float32, copy=True)
+        brake_state = brake_gate.update(
+            pre_brake_cmd_vel_b,
+            np.asarray(gate_estimator_outputs["base_force_est_local"], dtype=np.float32),
+            phase_name=str(scheduler_outputs["phase_name"]),
+        )
+
+        applied_force_w = scheduled_force_w.astype(np.float32, copy=True)
+        if brake_state.active:
+            guidance_state.effective_cmd_vel_b = np.zeros(3, dtype=np.float32)
+            applied_force_w = np.zeros(3, dtype=np.float32)
+
+        last_nominal_cmd_vel_b = guidance_state.effective_cmd_vel_b.astype(np.float32, copy=True)
+        last_external_force_w = applied_force_w.astype(np.float32, copy=True)
+        if float(np.linalg.norm(applied_force_w)) > 1.0e-6:
+            set_body_force(data, trunk_body_id, applied_force_w)
+        else:
+            clear_body_forces(data)
+
+        applied_force_target_n = float(np.linalg.norm(applied_force_w[:2]))
         base_force_tgt_local = world_to_base_yaw(
-            np.asarray(scheduler_outputs["force_w"], dtype=np.float32),
+            applied_force_w,
             base_quat,
         )
         estimator_outputs = extract_force_estimator_outputs(
             pred_est.astype(np.float32),
             base_force_tgt_local.astype(np.float32),
             base_force_scale=args.base_force_scale,
-        )
-
-        mode_state = switcher.update(
-            nominal_cmd_vel_b,
-            np.asarray(estimator_outputs["base_force_est_local"], dtype=np.float32),
-            dt=metadata.control_dt,
-        )
-        guidance_state = guidance_controller.compute(
-            nominal_cmd_vel_b,
-            np.asarray(estimator_outputs["base_force_est_local"], dtype=np.float32),
-            mode_state,
         )
         mode_counts[mode_state.mode] += 1
 
@@ -1550,11 +2086,14 @@ def main() -> int:
             step=step,
             time_s=time_s,
             nominal_cmd_vel_b=nominal_cmd_vel_b,
+            pre_brake_cmd_vel_b=pre_brake_cmd_vel_b,
             effective_cmd_vel_b=guidance_state.effective_cmd_vel_b,
+            applied_force_target_n=applied_force_target_n,
             base_lin_vel_local=base_lin_vel_local.astype(np.float32),
             estimator_outputs=estimator_outputs,
             mode_state=mode_state,
             guidance_state=guidance_state,
+            brake_state=brake_state,
             gait_phase=gait_clock_state.phase,
             force_segment_name=str(scheduler_outputs["segment_name"]),
             force_direction_name=str(scheduler_outputs["direction_name"]),
@@ -1569,9 +2108,12 @@ def main() -> int:
             step=step,
             time_s=time_s,
             nominal_cmd_vel_b=nominal_cmd_vel_b,
+            pre_brake_cmd_vel_b=pre_brake_cmd_vel_b,
             effective_cmd_vel_b=guidance_state.effective_cmd_vel_b,
+            applied_force_target_n=applied_force_target_n,
             mode_state=mode_state,
             guidance_state=guidance_state,
+            brake_state=brake_state,
             gait_phase=gait_clock_state.phase,
             force_segment_name=str(scheduler_outputs["segment_name"]),
             force_direction_name=str(scheduler_outputs["direction_name"]),
@@ -1603,7 +2145,9 @@ def main() -> int:
                         viewer,
                         data,
                         trunk_body_id=trunk_body_id,
-                        command_vel_xy=nominal_cmd_vel_b[:2],
+                        command_vel_xy=last_nominal_cmd_vel_b[:2],
+                        external_force_w=last_external_force_w,
+                        force_arrow_z_extra_offset=0.05,
                     )
                     viewer.sync()
 
