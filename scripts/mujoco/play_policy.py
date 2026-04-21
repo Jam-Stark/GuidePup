@@ -46,7 +46,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--model-path",
         type=Path,
-        default=Path("resources/aliengoZ1/mujoco/aliengoZ1.xml"),
+        default=Path("resources/aliengo_description/urdf/aliengo.urdf"),
         help="Path to a MuJoCo-loadable URDF or MJCF model.",
     )
     parser.add_argument(
@@ -63,30 +63,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
         metavar=("VX", "VY", "WZ"),
         default=None,
         help="Base velocity command before Isaac scaling. Defaults to metadata or built-in values.",
-    )
-    parser.add_argument(
-        "--ee-sphere-cmd",
-        type=float,
-        nargs=3,
-        metavar=("R", "PITCH", "YAW"),
-        default=None,
-        help="End-effector spherical command before Isaac scaling. Defaults to metadata or built-in values.",
-    )
-    parser.add_argument(
-        "--gripper-force-cmd",
-        type=float,
-        nargs=3,
-        metavar=("FX", "FY", "FZ"),
-        default=None,
-        help="Gripper force command in the same local frame used by the Isaac policy.",
-    )
-    parser.add_argument(
-        "--base-force-cmd",
-        type=float,
-        nargs=3,
-        metavar=("FX", "FY", "FZ"),
-        default=None,
-        help="Base force command in the same local frame used by the Isaac policy.",
     )
     parser.add_argument(
         "--obs-delay-steps",
@@ -120,14 +96,8 @@ def main() -> int:
         metadata = load_policy_metadata(args.policy_path, fallback=metadata)
 
     locomotion_cmd = parse_triplet(args.locomotion_cmd or metadata.default_locomotion_cmd)
-    ee_sphere_cmd = parse_triplet(args.ee_sphere_cmd or metadata.default_ee_sphere_cmd)
-    gripper_force_cmd = parse_triplet(args.gripper_force_cmd or metadata.default_gripper_force_cmd)
-    base_force_cmd = parse_triplet(args.base_force_cmd or metadata.default_base_force_cmd)
     command_obs = build_command_vector(
         locomotion_cmd=locomotion_cmd,
-        ee_sphere_cmd=ee_sphere_cmd,
-        gripper_force_cmd=gripper_force_cmd,
-        base_force_cmd=base_force_cmd,
         metadata=metadata,
     )
 
@@ -162,9 +132,7 @@ def main() -> int:
         f"gait_frequency_hz={metadata.gait_frequency_hz:.3f} "
         f"obs_delay_steps={args.obs_delay_steps} "
         f"leg_action_delay_steps={args.leg_action_delay_steps} "
-        f"freeze_arm_actions={int(metadata.freeze_arm_actions)} "
-        f"actuator_gains={summarize_joint_actuator_gains(metadata)} "
-        f"ee_sphere_cmd={tuple(float(v) for v in ee_sphere_cmd)}"
+        f"actuator_gains={summarize_joint_actuator_gains(metadata)}"
     )
 
     def run_control_step() -> None:

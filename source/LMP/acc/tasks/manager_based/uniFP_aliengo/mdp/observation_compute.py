@@ -90,29 +90,6 @@ def ee_goal_pos_in_sphere(env, command_name: str) -> torch.Tensor:
     return command_term.command[:, :3].view(env.num_envs, -1)
 
 
-def ee_pos_in_sphere(
-    env: ManagerBasedRLEnv,
-    gripper_cfg: SceneEntityCfg | None = None,
-) -> torch.Tensor:
-    """EE position in yaw-only, sphere-centered coordinates.
-
-    Frame:
-      - Origin: sphere center in world (base xy + yaw-rotated offset, fixed z from command cfg)
-      - Axes: aligned with base yaw only (roll/pitch ignored)
-    """
-    if gripper_cfg is None:
-        gripper_cfg = SceneEntityCfg("robot", body_names="gripperMover")
-
-    ee_pos_w = get_body_pos_w(env, gripper_cfg)
-    base_yaw_quat = get_base_yaw_quat(env)
-    sphere_center_w, _ = resolve_sphere_center_w(
-        env, command_name="target_position_commands", base_yaw_quat=base_yaw_quat
-    )
-    ee_rel_w = ee_pos_w - sphere_center_w
-    ee_rel_b = world_to_base_yaw(ee_rel_w, base_yaw_quat)
-    return cartesian_to_spherical(ee_rel_b)
-
-
 def ee_goal_pos_in_sphere_radius(env, command_name: str) -> torch.Tensor:
     """Computes the radius component of the target position command in spherical coordinates."""
     command_term = env.command_manager.get_term(command_name)
@@ -246,10 +223,10 @@ def privileged_mass_params(env: ManagerBasedRLEnv) -> torch.Tensor:
         - [1] com_x: 质心X轴偏移 (m)
         - [2] com_y: 质心Y轴偏移 (m)
         - [3] com_z: 质心Z轴偏移 (m)
-        - [4] gripper_mass_delta: 添加到夹爪的质量 (kg)
+        - [4] reserved_legacy_slot: 预留占位，当前 no-arm 分支固定不用
     
-    说明：这些值由 cache_base_mass_randomization 等事件函数按随机化分布采样并缓存，
-    Isaac Lab 当前未提供从引擎回读已应用值的接口。
+    说明：当前 active no-arm 链路只会写入基座质量增量与质心偏移；
+    第 5 个槽位仅为保持既有 privileged 观测宽度而保留。
     """
     # 初始化缓存
     if not hasattr(env, '_privileged_mass_params'):

@@ -254,33 +254,6 @@ def collect_observation_group_descriptors(env, group_names: list[str]) -> dict[s
                 "Command",
                 extras={"units": "unit", "axes": ["sin_phase", "cos_phase"]},
             )
-        if func_name == "all_commands_with_scales":
-            return _descriptor_template(
-                func,
-                shape,
-                dtype,
-                "Command",
-                extras={
-                    "units": "mixed",
-                    "axes": [
-                        "base_lin_vel_x",
-                        "base_lin_vel_y",
-                        "base_ang_vel_z",
-                        "ee_sphere_radius",
-                        "ee_sphere_pitch",
-                        "ee_sphere_yaw",
-                        "ee_orient_roll",
-                        "ee_orient_pitch",
-                        "ee_orient_yaw",
-                        "gripper_force_x",
-                        "gripper_force_y",
-                        "gripper_force_z",
-                        "base_force_x",
-                        "base_force_y",
-                        "base_force_z",
-                    ],
-                },
-            )
         if func_name == "locomotion_commands_with_scales":
             return _descriptor_template(
                 func,
@@ -371,14 +344,6 @@ def collect_observation_group_descriptors(env, group_names: list[str]) -> dict[s
             if term_cfg.func.__name__ == "gait_clock_signal":
                 item["command_name"] = term_cfg.params.get("gait_command_name", "gait_phase")
 
-            if term_cfg.func.__name__ == "all_commands_with_scales":
-                item["command_term_names"] = {
-                    "locomotion": term_cfg.params.get("locomotion_command_name", "locomotion_commands"),
-                    "target_position": term_cfg.params.get("target_position_command_name", "target_position_commands"),
-                    "gripper_force": term_cfg.params.get("gripper_force_command_name", "gripper_force_command"),
-                    "base_force": term_cfg.params.get("base_force_command_name", "base_force_command"),
-                }
-                item["command_scales"] = list(term_cfg.params.get("scales", []))
             if term_cfg.func.__name__ == "locomotion_commands_with_scales":
                 item["command_term_names"] = {
                     "locomotion": term_cfg.params.get("locomotion_command_name", "locomotion_commands"),

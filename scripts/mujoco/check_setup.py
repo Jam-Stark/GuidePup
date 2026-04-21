@@ -19,7 +19,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--model-path",
         type=Path,
-        default=Path("resources/aliengoZ1/mujoco/aliengoZ1.xml"),
+        default=Path("resources/aliengo_description/urdf/aliengo.urdf"),
         help="Path to a MuJoCo-loadable URDF or MJCF model.",
     )
     parser.add_argument(

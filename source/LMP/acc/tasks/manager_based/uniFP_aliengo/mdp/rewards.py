@@ -16,12 +16,9 @@ from isaaclab.utils.math import quat_apply, wrap_to_pi
 from .observation_compute import stance_mask, compute_ref_dof
 from .utils import (
     _get_force_command,
-    base_yaw_to_world,
     get_base_yaw_quat,
     get_body_pos_w,
     get_command_pos_w,
-    resolve_sphere_center_w,
-    spherical_to_cartesian,
     world_to_base_yaw,
 )
 
@@ -237,47 +234,6 @@ def tracking_lin_vel_force_world(
     reward = torch.exp(-lin_vel_error / tracking_sigma)
 
     return reward
-
-
-def tracking_ee_force_world(
-    env: ManagerBasedRLEnv,
-    command_name: str = "target_position_commands",
-    gripper_cfg: SceneEntityCfg = SceneEntityCfg("robot", body_names="gripperMover"),
-    force_command_name: str = "gripper_force_ext",
-    gripper_force_command_name: str = "gripper_force_command",
-    gripper_impedance_command_name: str = "gripper_impedance_command",
-    tracking_ee_sigma: float = 1.0,
-    ) -> torch.Tensor:
-    """Reward tracking EE position with force-offset goal in world frame."""
-    base_yaw_quat = get_base_yaw_quat(env)
-
-    gripper_force_ext_w = _get_force_command(env, force_command_name, use_applied=True)
-    gripper_force_cmd_l = env.command_manager.get_command(gripper_force_command_name)
-    gripper_force_cmd_w = base_yaw_to_world(gripper_force_cmd_l, base_yaw_quat)
-    forces_offset_w = gripper_force_ext_w + gripper_force_cmd_w
-
-    command_term = env.command_manager.get_term(command_name)
-    sphere_center_w, has_sphere_center = resolve_sphere_center_w(
-        env, command_term=command_term, base_yaw_quat=base_yaw_quat
-    )
-    if hasattr(command_term, "pos_w"):
-        curr_goal_w = command_term.pos_w
-    elif has_sphere_center:
-        curr_goal_cmd = command_term.command[:, :3]
-        curr_goal_b = spherical_to_cartesian(curr_goal_cmd)
-        curr_goal_w = base_yaw_to_world(curr_goal_b, base_yaw_quat) + sphere_center_w
-    else:
-        curr_goal_w = command_term.command[:, :3]
-
-    gripper_impedance_cmd = env.command_manager.get_command(gripper_impedance_command_name)
-    kps = torch.clamp(gripper_impedance_cmd[:, 0], min=1e-6)
-    curr_goal_w_offset = curr_goal_w + forces_offset_w / kps.unsqueeze(-1)
-
-    ee_pos_w = get_body_pos_w(env, gripper_cfg)
-    ee_pos_error = torch.sum(torch.abs(ee_pos_w - curr_goal_w_offset), dim=1)
-    return torch.exp(-ee_pos_error / tracking_ee_sigma * 2.0)
-
-
 def ref_dof_leg(
     env: ManagerBasedRLEnv,
     sigma: float = 0.1,
@@ -723,7 +679,7 @@ def stand_still(
     物理意义：
     - 站立时保持默认姿态可减少不必要的能量消耗
     - 有助于机器人学习稳定的站立平衡
-    - 只考虑腿部关节（12个），不影响机械臂关节
+    - 只考虑腿部关节（12个）
     - 使用指数奖励函数，对接近默认姿态给予高奖励
     
     Args:
@@ -805,7 +761,7 @@ def walking_dof(
     - 行走时保持接近默认姿态可以提高运动效率
     - 避免过度的关节偏移，减少能量消耗
     - 有助于学习更自然、稳定的步态
-    - 只考虑腿部关节（12个），不影响机械臂关节
+    - 只考虑腿部关节（12个）
     - 使用指数奖励函数，与 stand_still 类似但适用于行走状态
     
     Args:

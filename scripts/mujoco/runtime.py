@@ -36,11 +36,6 @@ def _default_joint_names() -> tuple[str, ...]:
         "FR_calf_joint",
         "RL_calf_joint",
         "RR_calf_joint",
-        "arm_joint1",
-        "arm_joint2",
-        "arm_joint3",
-        "arm_joint4",
-        "arm_joint5",
     )
 
 
@@ -75,11 +70,6 @@ def _default_joint_positions() -> tuple[float, ...]:
         -1.0,
         -1.0,
         -1.0,
-        0.0,
-        1.48,
-        -0.63,
-        -0.84,
-        0.0,
     )
 
 
@@ -99,11 +89,6 @@ def _default_obs_joint_positions() -> tuple[float, ...]:
         -1.0,
     )
 
-
-def _default_auxiliary_joint_defaults() -> dict[str, float]:
-    return {"arm_joint6": 1.57}
-
-
 def _default_joint_actuator_gains() -> dict[str, tuple[float, float]]:
     return {}
 
@@ -114,7 +99,6 @@ class UniFPPolicyMetadata:
     default_joint_pos: tuple[float, ...] = field(default_factory=_default_joint_positions)
     obs_joint_names: tuple[str, ...] = field(default_factory=_default_obs_joint_names)
     obs_default_joint_pos: tuple[float, ...] = field(default_factory=_default_obs_joint_positions)
-    auxiliary_joint_defaults: dict[str, float] = field(default_factory=_default_auxiliary_joint_defaults)
     action_scale: float = 0.25
     action_dim: int = 12
     leg_action_dim: int = 12
@@ -127,10 +111,6 @@ class UniFPPolicyMetadata:
     base_ang_vel_scale: float = 0.25
     command_scales: tuple[float, ...] = DEFAULT_LOCOMOTION_COMMAND_SCALES
     default_locomotion_cmd: tuple[float, float, float] = (0.0, 0.0, 0.0)
-    default_ee_sphere_cmd: tuple[float, float, float] = (0.55, 0.0, 0.0)
-    default_gripper_force_cmd: tuple[float, float, float] = (0.0, 0.0, 0.0)
-    default_base_force_cmd: tuple[float, float, float] = (0.0, 0.0, 0.0)
-    freeze_arm_actions: bool = True
     action_clip: float = 100.0
     joint_actuator_gains: dict[str, tuple[float, float]] = field(default_factory=_default_joint_actuator_gains)
 
@@ -152,7 +132,6 @@ class UniFPPolicyMetadata:
             "default_joint_pos": list(self.default_joint_pos),
             "obs_joint_names": list(self.obs_joint_names),
             "obs_default_joint_pos": list(self.obs_default_joint_pos),
-            "auxiliary_joint_defaults": dict(self.auxiliary_joint_defaults),
             "action_scale": self.action_scale,
             "action_dim": self.action_dim,
             "leg_action_dim": self.leg_action_dim,
@@ -165,10 +144,6 @@ class UniFPPolicyMetadata:
             "base_ang_vel_scale": self.base_ang_vel_scale,
             "command_scales": list(self.command_scales),
             "default_locomotion_cmd": list(self.default_locomotion_cmd),
-            "default_ee_sphere_cmd": list(self.default_ee_sphere_cmd),
-            "default_gripper_force_cmd": list(self.default_gripper_force_cmd),
-            "default_base_force_cmd": list(self.default_base_force_cmd),
-            "freeze_arm_actions": self.freeze_arm_actions,
             "action_clip": self.action_clip,
             "joint_actuator_gains": {
                 joint_name: [kp, kv] for joint_name, (kp, kv) in self.joint_actuator_gains.items()
@@ -196,10 +171,6 @@ class UniFPPolicyMetadata:
             default_joint_pos=tuple(float(v) for v in raw.get("default_joint_pos", base.default_joint_pos)),
             obs_joint_names=tuple(raw.get("obs_joint_names", base.obs_joint_names)),
             obs_default_joint_pos=tuple(float(v) for v in raw.get("obs_default_joint_pos", base.obs_default_joint_pos)),
-            auxiliary_joint_defaults={
-                str(name): float(value)
-                for name, value in dict(raw.get("auxiliary_joint_defaults", base.auxiliary_joint_defaults)).items()
-            },
             action_scale=float(raw.get("action_scale", base.action_scale)),
             action_dim=int(raw.get("action_dim", base.action_dim)),
             leg_action_dim=int(raw.get("leg_action_dim", base.leg_action_dim)),
@@ -212,14 +183,6 @@ class UniFPPolicyMetadata:
             base_ang_vel_scale=float(raw.get("base_ang_vel_scale", base.base_ang_vel_scale)),
             command_scales=tuple(float(v) for v in raw.get("command_scales", base.command_scales)),
             default_locomotion_cmd=tuple(float(v) for v in raw.get("default_locomotion_cmd", base.default_locomotion_cmd)),
-            default_ee_sphere_cmd=tuple(float(v) for v in raw.get("default_ee_sphere_cmd", base.default_ee_sphere_cmd)),
-            default_gripper_force_cmd=tuple(
-                float(v) for v in raw.get("default_gripper_force_cmd", base.default_gripper_force_cmd)
-            ),
-            default_base_force_cmd=tuple(
-                float(v) for v in raw.get("default_base_force_cmd", base.default_base_force_cmd)
-            ),
-            freeze_arm_actions=bool(raw.get("freeze_arm_actions", base.freeze_arm_actions)),
             action_clip=float(raw.get("action_clip", base.action_clip)),
             joint_actuator_gains=joint_actuator_gains,
         )
@@ -256,20 +219,11 @@ def default_staged_eval_metadata() -> UniFPPolicyMetadata:
         "FR_calf_joint": (180.0, 4.55),
         "RL_calf_joint": (180.0, 4.55),
         "RR_calf_joint": (180.0, 4.55),
-        "arm_joint1": (38.4, 1.4),        # IsaacLab: (64, 2.0)
-        "arm_joint2": (76.8, 2.1),        # IsaacLab: (128, 3.0)
-        "arm_joint3": (38.4, 1.4),
-        "arm_joint4": (38.4, 1.4),
-        "arm_joint5": (38.4, 1.4),
     }
     return replace(
         default_runtime_metadata(),
         gait_frequency_hz=3.0,
         default_locomotion_cmd=(0.0, 0.0, 0.0),
-        default_ee_sphere_cmd=(0.60, 0.0, 0.0),
-        default_gripper_force_cmd=(0.0, 0.0, 0.0),
-        default_base_force_cmd=(0.0, 0.0, 0.0),
-        freeze_arm_actions=True,
         joint_actuator_gains=gains,
     )
 
@@ -290,20 +244,11 @@ def default_smart_gait_metadata() -> UniFPPolicyMetadata:
         "FR_calf_joint": (96.0, 4.9),
         "RL_calf_joint": (96.0, 4.9),
         "RR_calf_joint": (96.0, 4.9),
-        "arm_joint1": (38.4, 1.05),       # IsaacLab smart gait: (64, 1.5)
-        "arm_joint2": (76.8, 2.1),        # IsaacLab smart gait: (128, 3.0)
-        "arm_joint3": (38.4, 1.05),
-        "arm_joint4": (38.4, 1.05),
-        "arm_joint5": (38.4, 1.05),
     }
     return replace(
         default_runtime_metadata(),
         gait_frequency_hz=2.0,
         default_locomotion_cmd=(0.0, 0.0, 0.0),
-        default_ee_sphere_cmd=(0.60, 0.0, 0.0),
-        default_gripper_force_cmd=(0.0, 0.0, 0.0),
-        default_base_force_cmd=(0.0, 0.0, 0.0),
-        freeze_arm_actions=True,
         joint_actuator_gains=gains,
     )
 
@@ -425,7 +370,6 @@ class ModelBindings:
     obs_qpos_indices: np.ndarray
     obs_qvel_indices: np.ndarray
     actuator_indices: np.ndarray
-    auxiliary_actuators: dict[int, float]
 
 
 def parse_triplet(values: Iterable[float]) -> np.ndarray:
@@ -498,32 +442,16 @@ def base_forward_axis_xy(base_quat_wxyz: np.ndarray) -> np.ndarray:
 def build_command_vector(
     *,
     locomotion_cmd: Iterable[float],
-    ee_sphere_cmd: Iterable[float],
-    gripper_force_cmd: Iterable[float],
-    base_force_cmd: Iterable[float],
     metadata: UniFPPolicyMetadata,
-    ee_orientation_cmd: Iterable[float] | None = None,
 ) -> np.ndarray:
-    if ee_orientation_cmd is None:
-        ee_orientation_cmd = (0.0, 0.0, 0.0)
-    full_command = np.concatenate(
-        (
-            parse_triplet(locomotion_cmd),
-            parse_triplet(ee_sphere_cmd),
-            parse_triplet(ee_orientation_cmd),
-            parse_triplet(gripper_force_cmd),
-            parse_triplet(base_force_cmd),
-        ),
-        axis=0,
-    )
+    full_command = parse_triplet(locomotion_cmd)
     scales = np.asarray(metadata.command_scales, dtype=np.float32)
-    if scales.ndim != 1:
-        raise RuntimeError(f"Expected 1-D command scales, received shape {tuple(scales.shape)}")
-    if scales.size > full_command.size:
+    if scales.shape != (3,):
         raise RuntimeError(
-            f"Command scale length {int(scales.size)} exceeds supported command size {int(full_command.size)}."
+            "Locomotion-only command vector expects exactly 3 command scales, "
+            f"received shape {tuple(scales.shape)}."
         )
-    return full_command[: scales.size] * scales
+    return full_command * scales
 
 
 @dataclass(frozen=True)
@@ -762,26 +690,6 @@ def resolve_joint_actuator_indices(model: "mujoco.MjModel", joint_ids: tuple[int
     return np.asarray(actuator_indices, dtype=np.int32)
 
 
-def resolve_auxiliary_actuators(
-    model: "mujoco.MjModel",
-    auxiliary_joint_defaults: dict[str, float],
-) -> dict[int, float]:
-    resolved: dict[int, float] = {}
-    for joint_name, default_value in auxiliary_joint_defaults.items():
-        try:
-            joint_id = model.joint(joint_name).id
-        except KeyError:
-            continue
-        matches = [
-            actuator_id
-            for actuator_id in range(model.nu)
-            if model.actuator_trnid[actuator_id, 0] == joint_id and model.actuator_trntype[actuator_id] == 0
-        ]
-        for actuator_id in matches:
-            resolved[actuator_id] = float(default_value)
-    return resolved
-
-
 def resolve_body_id(model: "mujoco.MjModel", body_name: str) -> int:
     return model.body(body_name).id
 
@@ -792,7 +700,6 @@ def create_model_bindings(model: "mujoco.MjModel", metadata: UniFPPolicyMetadata
     obs_joint_ids = resolve_joint_ids(model, metadata.obs_joint_names)
     obs_qpos_indices, obs_qvel_indices = resolve_qpos_qvel_indices(model, obs_joint_ids)
     actuator_indices = resolve_joint_actuator_indices(model, joint_ids)
-    auxiliary_actuators = resolve_auxiliary_actuators(model, metadata.auxiliary_joint_defaults)
     return ModelBindings(
         joint_ids=joint_ids,
         qpos_indices=qpos_indices,
@@ -801,7 +708,6 @@ def create_model_bindings(model: "mujoco.MjModel", metadata: UniFPPolicyMetadata
         obs_qpos_indices=obs_qpos_indices,
         obs_qvel_indices=obs_qvel_indices,
         actuator_indices=actuator_indices,
-        auxiliary_actuators=auxiliary_actuators,
     )
 
 
@@ -820,12 +726,6 @@ def reset_model_state(
             data.qpos[0:3] = np.array([0.0, 0.0, 0.5], dtype=np.float64)
             data.qpos[3:7] = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float64)
         data.qpos[qpos_indices] = np.asarray(metadata.default_joint_pos, dtype=np.float64)
-        for joint_name, joint_default in metadata.auxiliary_joint_defaults.items():
-            try:
-                joint = model.joint(joint_name)
-            except KeyError:
-                continue
-            data.qpos[model.jnt_qposadr[joint.id]] = joint_default
     mujoco.mj_forward(model, data)
 
 
@@ -942,12 +842,13 @@ def build_target_joint_positions(
     metadata: UniFPPolicyMetadata,
 ) -> np.ndarray:
     delayed_action = runtime_state.leg_action_delay.apply(action)
-    target_joint_pos = np.asarray(metadata.default_joint_pos, dtype=np.float32).copy()
-    target_joint_pos[: metadata.leg_action_dim] += metadata.action_scale * delayed_action[: metadata.leg_action_dim]
-    if not metadata.freeze_arm_actions:
-        target_joint_pos[metadata.leg_action_dim :] += (
-            metadata.action_scale * delayed_action[metadata.leg_action_dim :]
+    if metadata.leg_action_dim != len(metadata.default_joint_pos):
+        raise RuntimeError(
+            "Leg-only runtime expects default_joint_pos length to match leg_action_dim, "
+            f"got {len(metadata.default_joint_pos)} and {metadata.leg_action_dim}."
         )
+    target_joint_pos = np.asarray(metadata.default_joint_pos, dtype=np.float32).copy()
+    target_joint_pos += metadata.action_scale * delayed_action[: metadata.leg_action_dim]
     return target_joint_pos
 
 
@@ -957,8 +858,6 @@ def apply_control_targets(
     target_joint_pos: np.ndarray,
 ) -> None:
     data.ctrl[bindings.actuator_indices] = target_joint_pos
-    for actuator_id, actuator_target in bindings.auxiliary_actuators.items():
-        data.ctrl[actuator_id] = actuator_target
 
 
 def set_body_force(

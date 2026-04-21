@@ -7,29 +7,10 @@ from isaaclab.utils import configclass
 from . import mdp
 from .commands import ScriptedForceCommandCfg
 from .unifpaliengo_env_cfg import CommandsCfg as TrainCommandsCfg
+from .unifpaliengo_env_cfg import LEG_JOINT_NAMES
 from .unifpaliengo_env_cfg import UniFPAliengoEnvCfg
 
-
-RESET_JOINT_NAMES = [
-    "FL_hip_joint",
-    "FR_hip_joint",
-    "RL_hip_joint",
-    "RR_hip_joint",
-    "FL_thigh_joint",
-    "FR_thigh_joint",
-    "RL_thigh_joint",
-    "RR_thigh_joint",
-    "FL_calf_joint",
-    "FR_calf_joint",
-    "RL_calf_joint",
-    "RR_calf_joint",
-    "arm_joint1",
-    "arm_joint2",
-    "arm_joint3",
-    "arm_joint4",
-    "arm_joint5",
-    "arm_joint6",
-]
+RESET_JOINT_NAMES = list(LEG_JOINT_NAMES)
 
 
 @configclass
@@ -110,10 +91,6 @@ class UniFPAliengoReversePushEvalCfg(UniFPAliengoEnvCfg):
         self.scene.robot.actuators["thighs"].damping = 3.5
         self.scene.robot.actuators["calfs"].stiffness = 160.0
         self.scene.robot.actuators["calfs"].damping = 7.0
-        self.scene.robot.actuators["arm"].stiffness = 64.0
-        self.scene.robot.actuators["arm"].damping = 1.5
-        self.scene.robot.actuators["arm_shoulder"].stiffness = 128.0
-        self.scene.robot.actuators["arm_shoulder"].damping = 3.0
 
         self.commands.gait_phase.gait_frequency = 3.0
         self.commands.locomotion_commands.debug_vis = False

@@ -1231,7 +1231,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--model-path",
         type=Path,
-        default=Path("resources/aliengoZ1/mujoco/aliengoZ1.xml"),
+        default=Path("resources/aliengo_description/urdf/aliengo.urdf"),
         help="Path to a MuJoCo-loadable URDF or MJCF model.",
     )
     parser.add_argument("--policy-path", type=Path, required=True, help="Path to the MuJoCo-ready TorchScript policy.")
@@ -1344,9 +1344,6 @@ def main() -> int:
     nominal_cmd_vel_b = np.array([float(args.cmd_vx), float(args.cmd_vy), float(args.cmd_wz)], dtype=np.float32)
     initial_command_obs = build_command_vector(
         locomotion_cmd=nominal_cmd_vel_b,
-        ee_sphere_cmd=metadata.default_ee_sphere_cmd,
-        gripper_force_cmd=metadata.default_gripper_force_cmd,
-        base_force_cmd=metadata.default_base_force_cmd,
         metadata=metadata,
     )
 
@@ -1399,7 +1396,6 @@ def main() -> int:
         f"gait_frequency_hz={metadata.gait_frequency_hz:.3f} "
         f"obs_delay_steps={args.obs_delay_steps} "
         f"leg_action_delay_steps={args.leg_action_delay_steps} "
-        f"freeze_arm_actions={int(metadata.freeze_arm_actions)} "
         f"actuator_gains={summarize_joint_actuator_gains(metadata)}"
     )
     print(f"[INFO] CSV output: {output_csv}")
@@ -1524,9 +1520,6 @@ def main() -> int:
 
         next_command_obs = build_command_vector(
             locomotion_cmd=guidance_state.effective_cmd_vel_b,
-            ee_sphere_cmd=metadata.default_ee_sphere_cmd,
-            gripper_force_cmd=metadata.default_gripper_force_cmd,
-            base_force_cmd=metadata.default_base_force_cmd,
             metadata=metadata,
         )
         gait_override = gait_clock_state.step(mode_state.mode, metadata.control_dt)

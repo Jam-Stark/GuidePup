@@ -167,6 +167,6 @@ class ActionDistributionMetricsCommandCfg(CommandTermCfg):
     command_name: str = "action_distribution_metrics"
     dim: int = 1
 
-    action_term_names: tuple[str, ...] = ("leg_actions", "arm_actions")
+    action_term_names: tuple[str, ...] = ("leg_actions",)
     near_one_threshold: float = 0.95
     use_processed_actions: bool = True

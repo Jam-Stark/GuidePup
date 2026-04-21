@@ -35,9 +35,6 @@ class LegTorqueMetricsCommand(CommandTerm):
         self._rear_hip_joint_ids = self._asset.find_joints(list(cfg.rear_hip_joint_names))[0]
         self._rear_thigh_joint_ids = self._asset.find_joints(list(cfg.rear_thigh_joint_names))[0]
         self._rear_calf_joint_ids = self._asset.find_joints(list(cfg.rear_calf_joint_names))[0]
-        self._arm_joint_ids = self._asset.find_joints(list(cfg.arm_joint_names))[0]
-        self._arm_shoulder_joint_ids = self._asset.find_joints(list(cfg.arm_shoulder_joint_names))[0]
-        self._arm_other_joint_ids = self._asset.find_joints(list(cfg.arm_other_joint_names))[0]
 
         self.metrics["front_mean_util"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["rear_mean_util"] = torch.zeros(self.num_envs, device=self.device)
@@ -55,12 +52,6 @@ class LegTorqueMetricsCommand(CommandTerm):
         self.metrics["rear_thigh_max_util"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["rear_calf_mean_util"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["rear_calf_max_util"] = torch.zeros(self.num_envs, device=self.device)
-        self.metrics["arm_mean_util"] = torch.zeros(self.num_envs, device=self.device)
-        self.metrics["arm_max_util"] = torch.zeros(self.num_envs, device=self.device)
-        self.metrics["arm_shoulder_mean_util"] = torch.zeros(self.num_envs, device=self.device)
-        self.metrics["arm_shoulder_max_util"] = torch.zeros(self.num_envs, device=self.device)
-        self.metrics["arm_other_mean_util"] = torch.zeros(self.num_envs, device=self.device)
-        self.metrics["arm_other_max_util"] = torch.zeros(self.num_envs, device=self.device)
 
     @property
     def command(self) -> torch.Tensor:
@@ -88,9 +79,6 @@ class LegTorqueMetricsCommand(CommandTerm):
         rear_hip_mean, rear_hip_max = _util_stats(self._rear_hip_joint_ids)
         rear_thigh_mean, rear_thigh_max = _util_stats(self._rear_thigh_joint_ids)
         rear_calf_mean, rear_calf_max = _util_stats(self._rear_calf_joint_ids)
-        arm_mean, arm_max = _util_stats(self._arm_joint_ids)
-        arm_shoulder_mean, arm_shoulder_max = _util_stats(self._arm_shoulder_joint_ids)
-        arm_other_mean, arm_other_max = _util_stats(self._arm_other_joint_ids)
 
         self.metrics["front_hip_mean_util"] = front_hip_mean
         self.metrics["front_hip_max_util"] = front_hip_max
@@ -104,12 +92,6 @@ class LegTorqueMetricsCommand(CommandTerm):
         self.metrics["rear_thigh_max_util"] = rear_thigh_max
         self.metrics["rear_calf_mean_util"] = rear_calf_mean
         self.metrics["rear_calf_max_util"] = rear_calf_max
-        self.metrics["arm_mean_util"] = arm_mean
-        self.metrics["arm_max_util"] = arm_max
-        self.metrics["arm_shoulder_mean_util"] = arm_shoulder_mean
-        self.metrics["arm_shoulder_max_util"] = arm_shoulder_max
-        self.metrics["arm_other_mean_util"] = arm_other_mean
-        self.metrics["arm_other_max_util"] = arm_other_max
 
     def _resample_command(self, env_ids: Sequence[int]):
         env_ids_tensor = self._resolve_env_ids(env_ids)
@@ -159,12 +141,3 @@ class LegTorqueMetricsCommandCfg(CommandTermCfg):
     rear_hip_joint_names: tuple[str, ...] = ("RL_hip_joint", "RR_hip_joint")
     rear_thigh_joint_names: tuple[str, ...] = ("RL_thigh_joint", "RR_thigh_joint")
     rear_calf_joint_names: tuple[str, ...] = ("RL_calf_joint", "RR_calf_joint")
-    arm_joint_names: tuple[str, ...] = (
-        "arm_joint1",
-        "arm_joint2",
-        "arm_joint3",
-        "arm_joint4",
-        "arm_joint5",
-    )
-    arm_shoulder_joint_names: tuple[str, ...] = ("arm_joint2",)
-    arm_other_joint_names: tuple[str, ...] = ("arm_joint1", "arm_joint3", "arm_joint4", "arm_joint5")
