@@ -41,12 +41,38 @@ except ImportError:
     mujoco_viewer = None
 
 
+DEFAULT_STANDING_LIN_VEL_X_CLIP = 0.1
+DEFAULT_STANDING_LIN_VEL_Y_CLIP = 0.1
+DEFAULT_STANDING_ANG_VEL_YAW_CLIP = 0.2
+
+
+def clip_standing_command(
+    locomotion_cmd: np.ndarray,
+    *,
+    lin_vel_x_clip: float,
+    lin_vel_y_clip: float,
+    ang_vel_yaw_clip: float,
+) -> tuple[np.ndarray, bool]:
+    standing_command = (
+        abs(float(locomotion_cmd[0])) < float(lin_vel_x_clip)
+        and abs(float(locomotion_cmd[1])) < float(lin_vel_y_clip)
+        and abs(float(locomotion_cmd[2])) < float(ang_vel_yaw_clip)
+    )
+    if not standing_command:
+        return locomotion_cmd.astype(np.float32, copy=False), False
+    return np.zeros(3, dtype=np.float32), True
+
+
+def standing_gait_vector() -> np.ndarray:
+    return np.array([0.0, 1.0], dtype=np.float32)
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Minimal MuJoCo sim2sim runner for the UniFP Aliengo policy.")
     parser.add_argument(
         "--model-path",
         type=Path,
-        default=Path("resources/aliengo_description/urdf/aliengo.urdf"),
+        default=Path("resources/aliengo/mujoco/aliengo.xml"),
         help="Path to a MuJoCo-loadable URDF or MJCF model.",
     )
     parser.add_argument(
@@ -78,6 +104,24 @@ def build_arg_parser() -> argparse.ArgumentParser:
         choices=(0, 1),
         help="Fixed leg action delay in control steps. Training used a random 0-1 range.",
     )
+    parser.add_argument(
+        "--standing-lin-vel-x-clip",
+        type=float,
+        default=DEFAULT_STANDING_LIN_VEL_X_CLIP,
+        help="Treat |vx| below this threshold as standing, matching Isaac training command clipping.",
+    )
+    parser.add_argument(
+        "--standing-lin-vel-y-clip",
+        type=float,
+        default=DEFAULT_STANDING_LIN_VEL_Y_CLIP,
+        help="Treat |vy| below this threshold as standing, matching Isaac training command clipping.",
+    )
+    parser.add_argument(
+        "--standing-ang-vel-yaw-clip",
+        type=float,
+        default=DEFAULT_STANDING_ANG_VEL_YAW_CLIP,
+        help="Treat |wz| below this threshold as standing, matching Isaac training command clipping.",
+    )
     parser.add_argument("--headless", action="store_true", help="Run without the MuJoCo viewer.")
     parser.add_argument("--real-time", action="store_true", help="Sleep to match wall-clock control rate.")
     return parser
@@ -96,6 +140,13 @@ def main() -> int:
         metadata = load_policy_metadata(args.policy_path, fallback=metadata)
 
     locomotion_cmd = parse_triplet(args.locomotion_cmd or metadata.default_locomotion_cmd)
+    locomotion_cmd, standing_command = clip_standing_command(
+        locomotion_cmd,
+        lin_vel_x_clip=args.standing_lin_vel_x_clip,
+        lin_vel_y_clip=args.standing_lin_vel_y_clip,
+        ang_vel_yaw_clip=args.standing_ang_vel_yaw_clip,
+    )
+    gait_override = standing_gait_vector() if standing_command else None
     command_obs = build_command_vector(
         locomotion_cmd=locomotion_cmd,
         metadata=metadata,
@@ -125,6 +176,7 @@ def main() -> int:
         obs_delay_steps=args.obs_delay_steps,
         leg_action_delay_steps=args.leg_action_delay_steps,
         command_obs=command_obs,
+        gait_override=gait_override,
     )
 
     print(
@@ -132,6 +184,7 @@ def main() -> int:
         f"gait_frequency_hz={metadata.gait_frequency_hz:.3f} "
         f"obs_delay_steps={args.obs_delay_steps} "
         f"leg_action_delay_steps={args.leg_action_delay_steps} "
+        f"standing_command={standing_command} "
         f"actuator_gains={summarize_joint_actuator_gains(metadata)}"
     )
 
@@ -156,6 +209,7 @@ def main() -> int:
             runtime_state=runtime_state,
             action=action,
             command_obs=command_obs,
+            gait_override=gait_override,
         )
 
         if args.real_time:
