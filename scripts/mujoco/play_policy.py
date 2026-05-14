@@ -44,6 +44,29 @@ except ImportError:
 DEFAULT_STANDING_LIN_VEL_X_CLIP = 0.1
 DEFAULT_STANDING_LIN_VEL_Y_CLIP = 0.1
 DEFAULT_STANDING_ANG_VEL_YAW_CLIP = 0.2
+VIEWER_IMPORT_DELAY_S = 5.0
+VIEWER_DELAY_HIDDEN_BASE_POS = np.array([0.0, 0.0, -20.0], dtype=np.float64)
+
+IMPORT_INIT_HIP_POS = 0.0
+IMPORT_INIT_THIGH_POS = 1.45
+IMPORT_INIT_CALF_POS = -2.78
+IMPORT_INIT_LEG_QPOS = np.array(
+    [
+        IMPORT_INIT_HIP_POS,
+        IMPORT_INIT_HIP_POS,
+        IMPORT_INIT_HIP_POS,
+        IMPORT_INIT_HIP_POS,
+        IMPORT_INIT_THIGH_POS,
+        IMPORT_INIT_THIGH_POS,
+        IMPORT_INIT_THIGH_POS,
+        IMPORT_INIT_THIGH_POS,
+        IMPORT_INIT_CALF_POS,
+        IMPORT_INIT_CALF_POS,
+        IMPORT_INIT_CALF_POS,
+        IMPORT_INIT_CALF_POS,
+    ],
+    dtype=np.float64,
+)
 
 
 def clip_standing_command(
@@ -167,28 +190,40 @@ def main() -> int:
     apply_joint_actuator_gains(model, bindings, metadata)
     policy = load_torchscript_policy(args.policy_path) if args.policy_path else None
 
-    reset_model_state(mujoco, model, data, metadata, bindings.qpos_indices)
-    clear_body_forces(data)
-    runtime_state = initialize_runtime_state(
-        data=data,
-        bindings=bindings,
-        metadata=metadata,
-        obs_delay_steps=args.obs_delay_steps,
-        leg_action_delay_steps=args.leg_action_delay_steps,
-        command_obs=command_obs,
-        gait_override=gait_override,
-    )
+    def initialize_robot_runtime_state():
+        reset_model_state(mujoco, model, data, metadata, bindings.qpos_indices)
+        data.qpos[bindings.qpos_indices] = IMPORT_INIT_LEG_QPOS
+        mujoco.mj_forward(model, data)
+        clear_body_forces(data)
+        return initialize_runtime_state(
+            data=data,
+            bindings=bindings,
+            metadata=metadata,
+            obs_delay_steps=args.obs_delay_steps,
+            leg_action_delay_steps=args.leg_action_delay_steps,
+            command_obs=command_obs,
+            gait_override=gait_override,
+        )
 
-    print(
-        "[INFO] Runtime config: "
-        f"gait_frequency_hz={metadata.gait_frequency_hz:.3f} "
-        f"obs_delay_steps={args.obs_delay_steps} "
-        f"leg_action_delay_steps={args.leg_action_delay_steps} "
-        f"standing_command={standing_command} "
-        f"actuator_gains={summarize_joint_actuator_gains(metadata)}"
-    )
+    def hide_robot_during_viewer_delay() -> None:
+        mujoco.mj_resetData(model, data)
+        if model.nq >= 7:
+            data.qpos[0:3] = VIEWER_DELAY_HIDDEN_BASE_POS
+            data.qpos[3:7] = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float64)
+        clear_body_forces(data)
+        mujoco.mj_forward(model, data)
 
-    def run_control_step() -> None:
+    def print_runtime_config() -> None:
+        print(
+            "[INFO] Runtime config: "
+            f"gait_frequency_hz={metadata.gait_frequency_hz:.3f} "
+            f"obs_delay_steps={args.obs_delay_steps} "
+            f"leg_action_delay_steps={args.leg_action_delay_steps} "
+            f"standing_command={standing_command} "
+            f"actuator_gains={summarize_joint_actuator_gains(metadata)}"
+        )
+
+    def run_control_step(runtime_state) -> None:
         obs = runtime_state.policy_obs()
         action, _ = infer_policy_outputs(policy, obs, action_dim=metadata.action_dim)
         action = np.clip(action, -metadata.action_clip, metadata.action_clip)
@@ -218,16 +253,28 @@ def main() -> int:
                 time.sleep(sleep_time)
 
     if args.headless:
+        runtime_state = initialize_robot_runtime_state()
+        print_runtime_config()
         while data.time < args.duration_s:
-            run_control_step()
+            run_control_step(runtime_state)
     else:
         if mujoco_viewer is None:
             print("MuJoCo viewer is unavailable in this environment. Re-run with --headless.", file=sys.stderr)
             return 3
         with mujoco_viewer.launch_passive(model, data) as viewer:
+            hide_robot_during_viewer_delay()
+            delay_start = time.perf_counter()
+            while viewer.is_running() and (time.perf_counter() - delay_start) < VIEWER_IMPORT_DELAY_S:
+                viewer.sync()
+                time.sleep(0.01)
+            if not viewer.is_running():
+                return 0
+
+            runtime_state = initialize_robot_runtime_state()
+            print_runtime_config()
             configure_tracking_viewer_camera(mujoco, viewer, data, track_body_id=trunk_body_id)
             while viewer.is_running() and data.time < args.duration_s:
-                run_control_step()
+                run_control_step(runtime_state)
                 draw_velocity_arrows(
                     mujoco, viewer, data,
                     trunk_body_id=trunk_body_id,

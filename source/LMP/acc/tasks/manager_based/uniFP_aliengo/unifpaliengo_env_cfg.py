@@ -183,9 +183,8 @@ class CommandsCfg:
 @configclass
 class UniFPTerrainCfg(TerrainGeneratorCfg):
     """
-    VBC专用地形配置 - 实现"rough flat"粗糙平地
+    - 实现"rough flat"粗糙平地
     
-    按照VBC原始配置要求：
     - 地形类型为trimesh（三角网格）
     - 100%使用rough flat地形
     - 高度噪声范围[0.00, 0.1]米
