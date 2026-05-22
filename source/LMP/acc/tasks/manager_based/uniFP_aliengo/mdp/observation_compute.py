@@ -18,6 +18,7 @@ from isaaclab.utils.math import quat_apply, quat_inv
 
 from isaaclab.envs import ManagerBasedRLEnv
 from isaaclab.utils.math import transform_points
+from ..robot_constants import FOOT_BODY_NAMES, LEG_JOINT_NAMES
 from .io_descriptor_compat import generic_io_descriptor, record_dtype, record_shape
 from .utils import (
     _get_force_command,
@@ -51,6 +52,48 @@ def _record_command_aggregate_metadata(output: torch.Tensor, descriptor, **kwarg
         "locomotion": kwargs.get("locomotion_command_name", "locomotion_commands"),
     }
     descriptor.command_scales = _to_descriptor_list(kwargs.get("scales"))
+
+
+def _resolve_ordered_body_ids(entity, body_names: Sequence[str]) -> list[int]:
+    """Resolve bodies in caller-specified order and fail loudly if the robot model does not match."""
+    body_exprs = [rf".*{body_name}" for body_name in body_names]
+    body_ids, resolved_names = entity.find_bodies(body_exprs, preserve_order=True)
+    if len(resolved_names) != len(body_names) or any(
+        not resolved_name.endswith(body_name) for resolved_name, body_name in zip(resolved_names, body_names)
+    ):
+        raise ValueError(
+            f"Expected bodies {tuple(body_names)} in order, got {tuple(resolved_names)}."
+        )
+    return body_ids
+
+
+def ordered_foot_body_ids(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> list[int]:
+    """Return robot foot body ids in the policy/gait contract order: FL, FR, RL, RR."""
+    cache_name = f"_unifp_ordered_{asset_cfg.name}_foot_body_ids"
+    if hasattr(env, cache_name):
+        return getattr(env, cache_name)
+    robot: Articulation = env.scene[asset_cfg.name]
+    body_ids = _resolve_ordered_body_ids(robot, FOOT_BODY_NAMES)
+    setattr(env, cache_name, body_ids)
+    return body_ids
+
+
+def ordered_contact_sensor_body_ids(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg) -> list[int]:
+    """Return contact sensor foot body ids in the policy/gait contract order: FL, FR, RL, RR."""
+    cache_name = f"_unifp_ordered_{sensor_cfg.name}_body_ids"
+    if hasattr(env, cache_name):
+        return getattr(env, cache_name)
+    contact_sensor = env.scene[sensor_cfg.name]
+    body_ids = _resolve_ordered_body_ids(contact_sensor, FOOT_BODY_NAMES)
+    setattr(env, cache_name, body_ids)
+    return body_ids
+
+
+def ordered_foot_contact_forces(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg) -> torch.Tensor:
+    """Return foot contact forces in the policy/gait contract order: FL, FR, RL, RR."""
+    contact_sensor = env.scene[sensor_cfg.name]
+    body_ids = ordered_contact_sensor_body_ids(env, sensor_cfg)
+    return contact_sensor.data.net_forces_w[:, body_ids, :]
 
 
 def ee_pos_in_base_frame(env, gripper_cfg: SceneEntityCfg) -> torch.Tensor:
@@ -190,8 +233,8 @@ def foot_contact_binary(
     Returns:
         Tensor containing binary contact states for each foot.
     """
-    # Get contact forces from the sensor
-    contact_forces = env.scene[sensor_cfg.name].data.net_forces_w
+    # Get contact forces from the sensor in the policy/gait contract order.
+    contact_forces = ordered_foot_contact_forces(env, sensor_cfg)
     
     # Calculate the norm of contact forces and check against threshold
     contact_binary = (torch.norm(contact_forces, dim=-1) > threshold).float()
@@ -425,21 +468,9 @@ def compute_ref_dof(
     """
     # Cache joint ids for the 12 leg joints (consistent with env config order).
     if not hasattr(env, "_unifp_leg_joint_ids"):
-        leg_joint_names = [
-            "FL_hip_joint",
-            "FR_hip_joint",
-            "RL_hip_joint",
-            "RR_hip_joint",
-            "FL_thigh_joint",
-            "FR_thigh_joint",
-            "RL_thigh_joint",
-            "RR_thigh_joint",
-            "FL_calf_joint",
-            "FR_calf_joint",
-            "RL_calf_joint",
-            "RR_calf_joint",
-        ]
-        env._unifp_leg_joint_ids = env.scene["robot"].find_joints(leg_joint_names)[0]
+        env._unifp_leg_joint_ids = env.scene["robot"].find_joints(
+            list(LEG_JOINT_NAMES), preserve_order=True
+        )[0]
 
     # Avoid recomputing multiple times within the same simulation step.
     if not hasattr(env, "_unifp_ref_dof_last_update_step"):
@@ -495,7 +526,7 @@ def compute_ref_dof(
     thigh_amp = float(target_joint_pos_scale)
     calf_amp = float(target_joint_pos_scale) * float(calf_scale_factor)
 
-    # AliengoZ1 URDF uses the same joint axis direction for thigh/calf across legs,
+    # A2 URDF uses the same joint axis direction for thigh/calf across legs,
     # so we apply identical sign conventions for all feet.
     ref_dof_pos[:, 4:8] = ref_dof_pos[:, 4:8] + lift * thigh_amp
     ref_dof_pos[:, 8:12] = ref_dof_pos[:, 8:12] - lift * calf_amp

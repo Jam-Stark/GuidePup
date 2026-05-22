@@ -13,7 +13,14 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.sensors import RayCaster
 from isaaclab.utils.math import quat_apply, wrap_to_pi
 
-from .observation_compute import stance_mask, compute_ref_dof
+from .observation_compute import (
+    compute_ref_dof,
+    ordered_foot_body_ids,
+    ordered_foot_contact_forces,
+    ordered_contact_sensor_body_ids,
+    stance_mask,
+)
+from ..robot_constants import FOOT_BODY_NAMES
 from .utils import (
     _get_force_command,
     get_base_yaw_quat,
@@ -79,7 +86,7 @@ def feet_contact_number(
     
     # 获取足部接触力（世界坐标系）
     # Shape: (num_envs, 4, 3) - 4只脚，每只脚3维力向量
-    contact_forces = contact_sensor.data.net_forces_w
+    contact_forces = ordered_foot_contact_forces(env, sensor_cfg)
     
     # 计算每只脚的接触力大小
     # Shape: (num_envs, 4)
@@ -122,7 +129,7 @@ def feet_contact_forces_l1(
 
     # 获取足部接触力（世界坐标系）
     # Shape: (num_envs, 4, 3) - 4只脚，每只脚3维力向量
-    contact_forces = contact_sensor.data.net_forces_w
+    contact_forces = ordered_foot_contact_forces(env, sensor_cfg)
 
     # 计算每只脚的接触力大小（L2 范数）
     # Shape: (num_envs, 4)
@@ -155,9 +162,8 @@ def feet_pos_xy(
     """
     robot: Articulation = env.scene[asset_cfg.name]
 
-    foot_indices, foot_names = robot.find_bodies([".*_foot"], preserve_order=True)
-    if len(foot_indices) == 0:
-        return torch.zeros(env.num_envs, device=env.device)
+    foot_indices = ordered_foot_body_ids(env, asset_cfg)
+    foot_names = list(FOOT_BODY_NAMES)
 
     name_to_index = {name: idx for idx, name in enumerate(robot.body_names)}
     thigh_indices: list[int] = []
@@ -314,8 +320,9 @@ def feet_air_time(
 
     dt = env.step_dt
     # 计算腾空时间奖励
-    first_contact_filter = contact_sensor.compute_first_contact(dt)
-    air_time = contact_sensor.data.current_air_time
+    foot_body_ids = ordered_contact_sensor_body_ids(env, SceneEntityCfg("contact_feet_forces"))
+    first_contact_filter = contact_sensor.compute_first_contact(dt)[:, foot_body_ids]
+    air_time = contact_sensor.data.current_air_time[:, foot_body_ids]
     air_time_reward = torch.sum((air_time - float(target_air_time)) * first_contact_filter.float(), dim=1)
     
     # 只在 walking 状态下给奖励
@@ -852,16 +859,18 @@ def reward_tracking_contacts_shaped_force(
     Returns:
         惩罚值 (num_envs,) - 值越大表示违反越严重
     """
-    # 获取接触力
-    contact_sensor = env.scene["contact_feet_forces"]
+    # 获取接触力，按 FL/FR/RL/RR 顺序排列。
+    sensor_cfg = SceneEntityCfg("contact_feet_forces")
+    contact_sensor = env.scene[sensor_cfg.name]
+    foot_body_ids = ordered_contact_sensor_body_ids(env, sensor_cfg)
     
     # 尝试使用不同的方法获取接触力
     # 方法1：使用 net_forces_w（标准方法）
     if contact_sensor.data.net_forces_w is not None and contact_sensor.data.net_forces_w.numel() > 0:
-        foot_forces = torch.norm(contact_sensor.data.net_forces_w, dim=-1)
+        foot_forces = torch.norm(contact_sensor.data.net_forces_w[:, foot_body_ids, :], dim=-1)
     # 方法2：如果 net_forces_w 不可用，尝试使用 force_matrix_w
     elif hasattr(contact_sensor.data, 'force_matrix_w') and contact_sensor.data.force_matrix_w is not None:
-        foot_forces = torch.norm(contact_sensor.data.force_matrix_w.squeeze(-2), dim=-1)
+        foot_forces = torch.norm(contact_sensor.data.force_matrix_w.squeeze(-2)[:, foot_body_ids, :], dim=-1)
     # 方法3：使用二值接触状态 * 近似力（基于机器人重量）
     else:
         # 如果接触力数据不可用，使用二值接触判断
@@ -925,7 +934,7 @@ def reward_tracking_contacts_shaped_vel(
     """
     # 获取足部速度
     robot: Articulation = env.scene[asset_cfg.name]
-    foot_indices = robot.find_bodies([".*_foot"])[0]
+    foot_indices = ordered_foot_body_ids(env, asset_cfg)
     foot_vel_w = robot.data.body_lin_vel_w[:, foot_indices]
     foot_velocities = torch.norm(foot_vel_w, dim=-1)
     
@@ -1032,7 +1041,7 @@ def reward_feet_height(
         - 配合正权重使用（如 weight=1.0）
     """
     robot: Articulation = env.scene[asset_cfg.name]
-    foot_indices = robot.find_bodies([".*_foot"])[0]
+    foot_indices = ordered_foot_body_ids(env, asset_cfg)
     
     # 获取足部高度
     if all_feet:
@@ -1067,9 +1076,7 @@ def feet_height_high(
     在站立/停止命令时，将惩罚置零。
     """
     robot: Articulation = env.scene[asset_cfg.name]
-    foot_indices = robot.find_bodies([".*_foot"])[0]
-    if len(foot_indices) == 0:
-        return torch.zeros(env.num_envs, device=env.device)
+    foot_indices = ordered_foot_body_ids(env, asset_cfg)
 
     foot_heights = robot.data.body_pos_w[:, foot_indices, 2]
     max_height = torch.max(foot_heights, dim=-1)[0]
@@ -1115,12 +1122,9 @@ def feet_jerk(
             params={"sensor_cfg": SceneEntityCfg("contact_feet_forces")}
         )
     """
-    # 获取接触传感器
-    contact_sensor = env.scene[sensor_cfg.name]
-    
     # 获取当前足部接触力（世界坐标系）
     # Shape: (num_envs, 4, 3) - 4只脚，每只脚3维力向量
-    current_forces = contact_sensor.data.net_forces_w
+    current_forces = ordered_foot_contact_forces(env, sensor_cfg)
     
     # 计算每只脚的接触力大小（L2范数）
     # Shape: (num_envs, 4) - 每只脚的力大小
@@ -1189,23 +1193,19 @@ def feet_drag(
             }
         )
     """
-    # 获取接触传感器
-    contact_sensor = env.scene[sensor_cfg.name]
-    
     # 获取机器人资产
     robot: Articulation = env.scene[asset_cfg.name]
     
     # 获取足部接触力（世界坐标系）
     # Shape: (num_envs, 4, 3) - 4只脚，每只脚3维力向量
-    contact_forces = contact_sensor.data.net_forces_w
+    contact_forces = ordered_foot_contact_forces(env, sensor_cfg)
     
     # 计算每只脚的接触力大小（L2 范数）
     # Shape: (num_envs, 4)
     foot_force_norm = torch.norm(contact_forces, dim=-1)
     
     # 获取足部在世界坐标系下的速度
-    # 找到所有名为 "*_foot" 的body
-    foot_indices = robot.find_bodies([".*_foot"])[0]
+    foot_indices = ordered_foot_body_ids(env, asset_cfg)
     
     # 获取足部速度（世界坐标系）
     # Shape: (num_envs, 4, 3) - 4只脚，每只脚3维速度向量

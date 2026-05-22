@@ -57,7 +57,7 @@ class ReversePushEvalEventCfg:
         params={
             "position_range": (0.0, 0.0),
             "velocity_range": (0.0, 0.0),
-            "asset_cfg": SceneEntityCfg("robot", joint_names=RESET_JOINT_NAMES),
+            "asset_cfg": SceneEntityCfg("robot", joint_names=RESET_JOINT_NAMES, preserve_order=True),
         },
     )
 
@@ -85,12 +85,12 @@ class UniFPAliengoReversePushEvalCfg(UniFPAliengoEnvCfg):
         self.viewer.eye = (4.0, -2.5, 2.2)
         self.viewer.lookat = (0.0, 0.0, 0.5)
 
-        self.scene.robot.actuators["hips"].stiffness = 100.0
-        self.scene.robot.actuators["hips"].damping = 3.5
-        self.scene.robot.actuators["thighs"].stiffness = 100.0
-        self.scene.robot.actuators["thighs"].damping = 3.5
-        self.scene.robot.actuators["calfs"].stiffness = 160.0
-        self.scene.robot.actuators["calfs"].damping = 7.0
+        self.scene.robot.actuators["hips"].stiffness = 140.0
+        self.scene.robot.actuators["hips"].damping = 5.0
+        self.scene.robot.actuators["thighs"].stiffness = 140.0
+        self.scene.robot.actuators["thighs"].damping = 5.0
+        self.scene.robot.actuators["calfs"].stiffness = 220.0
+        self.scene.robot.actuators["calfs"].damping = 9.0
 
         self.commands.gait_phase.gait_frequency = 3.0
         self.commands.locomotion_commands.debug_vis = False

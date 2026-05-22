@@ -30,9 +30,13 @@ class FrontBackLegTorquesRecorder(RecorderTerm):
         if self._asset is None:
             self._asset = self._env.scene[self.cfg.asset_name]
         if self._front_leg_joint_ids is None:
-            self._front_leg_joint_ids = self._asset.find_joints(list(self.cfg.front_leg_joint_names))[0]
+            self._front_leg_joint_ids = self._asset.find_joints(
+                list(self.cfg.front_leg_joint_names), preserve_order=True
+            )[0]
         if self._rear_leg_joint_ids is None:
-            self._rear_leg_joint_ids = self._asset.find_joints(list(self.cfg.rear_leg_joint_names))[0]
+            self._rear_leg_joint_ids = self._asset.find_joints(
+                list(self.cfg.rear_leg_joint_names), preserve_order=True
+            )[0]
 
     def record_post_step(self) -> tuple[str | None, torch.Tensor | dict | None]:
         self._resolve_joint_ids()

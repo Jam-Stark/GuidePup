@@ -21,6 +21,7 @@ from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 from isaaclab.utils import modifiers as modifier_utils
 from isaaclab.utils.noise import GaussianNoiseCfg
 
+from .robot_constants import BASE_BODY_NAME, FOOT_BODY_NAMES, LEG_JOINT_NAMES  # noqa: F401
 from . import mdp
 from .mdp.recorders import FrontBackLegTorquesRecorderCfg
 from isaaclab.managers import CommandTermCfg, CurriculumTermCfg
@@ -50,24 +51,10 @@ from .metrics import (
 ##
 FORCE_COMMAND_RESUME_STEPS = 0 * 24  # 恢复力命令的训练步数阈值
 FORCE_COMMAND_START_STEPS = 8000 * 24  # 启用力命令的训练步数阈值
-BASE_EXT_FULL_RANGE = (-40.0, 40.0)  # base力的完整范围
-BASE_FORCE_KD = 100.0
+BASE_EXT_FULL_RANGE = (-65.0, 65.0)  # A2 base力的完整范围
+BASE_FORCE_KD = 160.0
 POLICY_OBS_DELAY_RANGE_STEPS = (0, 2)  # policy观测延迟范围（env steps）
 LEG_ACTION_DELAY_RANGE_STEPS = (0, 1)  # 腿部动作延迟范围（env steps）
-LEG_JOINT_NAMES = (
-    "FL_hip_joint",
-    "FR_hip_joint",
-    "RL_hip_joint",
-    "RR_hip_joint",
-    "FL_thigh_joint",
-    "FR_thigh_joint",
-    "RL_thigh_joint",
-    "RR_thigh_joint",
-    "FL_calf_joint",
-    "FR_calf_joint",
-    "RL_calf_joint",
-    "RR_calf_joint",
-)
 
 
 def make_policy_obs_delay_modifier_cfg() -> modifier_utils.ModifierCfg:
@@ -122,7 +109,7 @@ class CommandsCfg:
 
         strategy: str = "uniform"
         asset_name: str = "robot"
-        body_name: str = "base"
+        body_name: str = BASE_BODY_NAME
         debug_vis: bool = True
 
         goal_vel_visualizer_cfg: VisualizationMarkersCfg = BLUE_ARROW_X_MARKER_CFG.replace(
@@ -257,7 +244,7 @@ class UniFPSceneCfg(InteractiveSceneCfg):
     robot: ArticulationCfg = ArticulationCfg(
         prim_path="/World/envs/env_.*/Robot",
         spawn=sim_utils.UrdfFileCfg(
-            asset_path="resources/aliengo/urdf/aliengo.urdf",
+            asset_path="resources/a2_description/urdf/a2.urdf",
             fix_base=False,
             activate_contact_sensors=True,  # 启用接触传感器
             merge_fixed_joints=False,  # 保留足部等固定关节链接
@@ -299,22 +286,22 @@ class UniFPSceneCfg(InteractiveSceneCfg):
         
         # 初始状态配置
         init_state=ArticulationCfg.InitialStateCfg(
-            pos=[0.0, 0.0, 0.5],
+            pos=[0.0, 0.0, 0.55],
             rot=[1.0, 0.0, 0.0, 0.0],
             joint_pos={
-                "FL_hip_joint": 0.1,  # [rad]
+                "FL_hip_joint": 0.0,  # [rad]
                 "FL_thigh_joint": 0.5,  # [rad]
                 "FL_calf_joint": -1.0,  # [rad]
 
-                "RL_hip_joint": 0.1,  # [rad]
+                "RL_hip_joint": 0.0,  # [rad]
                 "RL_thigh_joint": 0.5,  # [rad]
                 "RL_calf_joint": -1.0,  # [rad]
 
-                "FR_hip_joint": -0.1,  # [rad]
+                "FR_hip_joint": 0.0,  # [rad]
                 "FR_thigh_joint": 0.5,  # [rad]
                 "FR_calf_joint": -1.0,  # [rad]
 
-                "RR_hip_joint": -0.1,  # [rad]
+                "RR_hip_joint": 0.0,  # [rad]
                 "RR_thigh_joint": 0.5,  # [rad]
                 "RR_calf_joint": -1.0,  # [rad]
             },
@@ -328,32 +315,30 @@ class UniFPSceneCfg(InteractiveSceneCfg):
                 joint_names_expr=[
                     "FL_hip_joint", "FR_hip_joint", "RL_hip_joint", "RR_hip_joint",          # hip joints
                 ],
-                effort_limit_sim=35.0,
-                velocity_limit_sim=20.0,
-                stiffness=100.0,
-                damping=3.5,
+                effort_limit_sim=120.0,
+                velocity_limit_sim=22.0,
+                stiffness=140.0,
+                damping=5.0,
                 armature=0.0,
             ),
             "thighs": ImplicitActuatorCfg(
                 joint_names_expr=[
                     "FL_thigh_joint", "FR_thigh_joint", "RL_thigh_joint", "RR_thigh_joint",  # thigh joints
                 ],
-                effort_limit_sim=35.0,
-                velocity_limit_sim=20.0,
-                stiffness=100.0,
-                damping=3.5,
+                effort_limit_sim=120.0,
+                velocity_limit_sim=22.0,
+                stiffness=140.0,
+                damping=5.0,
                 armature=0.0,
             ),
             "calfs": ImplicitActuatorCfg(
                 joint_names_expr=[
                     "FL_calf_joint", "FR_calf_joint", "RL_calf_joint", "RR_calf_joint",      # calf joints
                 ],
-                # Aliengo URDF: Calf max 44.4 Nm, others 35.3 Nm
-                effort_limit_sim=45.0,
-                # Aliengo URDF: Hip/Thigh max 20 rad/s, Calf 15.9 rad/s
-                velocity_limit_sim=15.0,
-                stiffness=160.0,
-                damping=7.0,
+                effort_limit_sim=180.0,
+                velocity_limit_sim=14.6667,
+                stiffness=220.0,
+                damping=9.0,
                 armature=0.0,
             ),
         },
@@ -378,9 +363,9 @@ class UniFPSceneCfg(InteractiveSceneCfg):
         track_pose=False,  # 不需要跟踪姿态（性能优化）
     )
     
-    # 非法接触检测 penalize_contacts_on = ["thigh", "calf","trunk"]
+    # 非法接触检测 penalize_contacts_on = ["thigh", "calf", "base_link"]
     penalize_contacts: ContactSensorCfg = ContactSensorCfg(
-        prim_path="/World/envs/env_.*/Robot/.*(_thigh|_calf|trunk)",
+        prim_path="/World/envs/env_.*/Robot/.*(_thigh|_calf|base_link)",
         update_period=0.0,
         force_threshold=1.0,
         history_length=1,
@@ -400,13 +385,14 @@ class ActionsCfg:
         joint_names=list(LEG_JOINT_NAMES),
         scale=0.25,
         use_default_offset=True,
+        preserve_order=True,
         clip={".*": (-100.0, 100.0)},
         min_delay_steps=LEG_ACTION_DELAY_RANGE_STEPS[0],
         max_delay_steps=LEG_ACTION_DELAY_RANGE_STEPS[1],
     )
     base_force_ext = mdp.ApplyForceCommandActionCfg(
         asset_name="robot",
-        body_name="trunk",
+        body_name=BASE_BODY_NAME,
         command_name="base_force_ext",
     )
 
@@ -450,12 +436,7 @@ class ObservationsCfg:
         # 3. 腿部关节位置 (12维)
         dof_pos = ObsTerm(
             func=mdp.joint_pos_rel,
-            params={"asset_cfg": SceneEntityCfg("robot", joint_names=[
-                "FL_hip_joint", "FR_hip_joint", "RL_hip_joint", "RR_hip_joint",
-                "FL_thigh_joint", "FR_thigh_joint", "RL_thigh_joint",
-                "RR_thigh_joint", "FL_calf_joint", "FR_calf_joint",
-                "RL_calf_joint", "RR_calf_joint"
-            ])},
+            params={"asset_cfg": SceneEntityCfg("robot", joint_names=list(LEG_JOINT_NAMES), preserve_order=True)},
             modifiers=[make_policy_obs_delay_modifier_cfg()],
             noise=GaussianNoiseCfg(mean=0.0, std=0.01, operation="add"),
             scale=1.0,
@@ -466,12 +447,7 @@ class ObservationsCfg:
         joint_vel = ObsTerm(
             func=mdp.joint_vel_rel,
             params={
-                "asset_cfg": SceneEntityCfg("robot", joint_names=[
-                    "FL_hip_joint", "FR_hip_joint", "RL_hip_joint", "RR_hip_joint",
-                    "FL_thigh_joint", "FR_thigh_joint", "RL_thigh_joint",
-                    "RR_thigh_joint", "FL_calf_joint", "FR_calf_joint",
-                    "RL_calf_joint", "RR_calf_joint"
-                ])},
+                "asset_cfg": SceneEntityCfg("robot", joint_names=list(LEG_JOINT_NAMES), preserve_order=True)},
             modifiers=[make_policy_obs_delay_modifier_cfg()],
             noise=GaussianNoiseCfg(mean=0.0, std=1.5, operation="add"),
             scale=0.05,
@@ -603,12 +579,7 @@ class ObservationsCfg:
         # 13. 腿部关节位置 (12维)
         dof_pos = ObsTerm(
             func=mdp.joint_pos_rel,
-            params={"asset_cfg": SceneEntityCfg("robot", joint_names=[
-                "FL_hip_joint", "FR_hip_joint", "RL_hip_joint", "RR_hip_joint",
-                "FL_thigh_joint", "FR_thigh_joint", "RL_thigh_joint",
-                "RR_thigh_joint", "FL_calf_joint", "FR_calf_joint",
-                "RL_calf_joint", "RR_calf_joint"
-            ])},
+            params={"asset_cfg": SceneEntityCfg("robot", joint_names=list(LEG_JOINT_NAMES), preserve_order=True)},
             scale=1.0,
             clip=(-100.0, 100.0)
         )
@@ -617,12 +588,7 @@ class ObservationsCfg:
         joint_vel = ObsTerm(
             func=mdp.joint_vel_rel,
             params={
-                "asset_cfg": SceneEntityCfg("robot", joint_names=[
-                    "FL_hip_joint", "FR_hip_joint", "RL_hip_joint", "RR_hip_joint",
-                    "FL_thigh_joint", "FR_thigh_joint", "RL_thigh_joint",
-                    "RR_thigh_joint", "FL_calf_joint", "FR_calf_joint",
-                    "RL_calf_joint", "RR_calf_joint"
-                ])},
+                "asset_cfg": SceneEntityCfg("robot", joint_names=list(LEG_JOINT_NAMES), preserve_order=True)},
             scale=0.05,
             clip=(-100.0, 100.0)
         )
@@ -801,7 +767,7 @@ class EventCfg:
         params={
             "position_range": (0.0, 0.0),
             "velocity_range": (0.0, 0.0),
-            "asset_cfg": SceneEntityCfg("robot", joint_names=list(LEG_JOINT_NAMES)),
+            "asset_cfg": SceneEntityCfg("robot", joint_names=list(LEG_JOINT_NAMES), preserve_order=True),
         },
     )
     
@@ -826,11 +792,7 @@ class EventCfg:
         func=mdp.my_randomize_actuator_gains,
         mode="reset",
         params={
-            "asset_cfg": SceneEntityCfg("robot", joint_names=[
-                "FL_hip_joint", "FR_hip_joint", "RL_hip_joint", "RR_hip_joint",
-                "FL_thigh_joint", "FR_thigh_joint", "RL_thigh_joint", "RR_thigh_joint",
-                "FL_calf_joint", "FR_calf_joint", "RL_calf_joint", "RR_calf_joint",
-            ]),
+            "asset_cfg": SceneEntityCfg("robot", joint_names=list(LEG_JOINT_NAMES), preserve_order=True),
             "stiffness_distribution_params": (0.9, 1.1),  # 缩放因子范围
             "damping_distribution_params": (0.9, 1.1),
             "operation": "scale",  # 缩放操作
@@ -840,13 +802,13 @@ class EventCfg:
 
     # ========== 启动时随机化事件 (startup mode) ==========
     
-    # 4. 基座质量随机化 - 增加0到10公斤（使用缓存版本以保存采样值）
+    # 4. 基座质量随机化 - 增加0到8公斤（使用缓存版本以保存采样值）
     randomize_base_mass = EventTerm(
         func=mdp.my_randomize_rigid_body_mass,
         mode="startup",
         params={
-            "asset_cfg": SceneEntityCfg("robot", body_names="trunk"),
-            "mass_distribution_params": (0.0, 5.0),
+            "asset_cfg": SceneEntityCfg("robot", body_names=BASE_BODY_NAME),
+            "mass_distribution_params": (0.0, 8.0),
             "operation": "add",  # 添加操作
             "distribution": "uniform",
             "recompute_inertia": True,  # 重新计算惯性张量
@@ -858,7 +820,7 @@ class EventCfg:
         func=mdp.my_randomize_rigid_body_com,
         mode="startup",
         params={
-            "asset_cfg": SceneEntityCfg("robot", body_names="trunk"),
+            "asset_cfg": SceneEntityCfg("robot", body_names=BASE_BODY_NAME),
             "com_range": {
                 "x": (-0.1, 0.1),
                 "y": (-0.1, 0.1),
@@ -912,21 +874,12 @@ class RewardsCfg:
     torques = RewTerm(
         func=mdp.joint_torques_l2,
         weight=-5.0e-6,
-        params={"asset_cfg": SceneEntityCfg("robot", joint_names=[
-            "FL_hip_joint", "FR_hip_joint", "RL_hip_joint", "RR_hip_joint",
-            "FL_thigh_joint", "FR_thigh_joint", "RL_thigh_joint", "RR_thigh_joint",
-            "FL_calf_joint", "FR_calf_joint", "RL_calf_joint", "RR_calf_joint",
-        ])}
+        params={"asset_cfg": SceneEntityCfg("robot", joint_names=list(LEG_JOINT_NAMES), preserve_order=True)}
     )
     stand_still = RewTerm(
         func=mdp.stand_still,
         weight=0.5,
-        params={"asset_cfg": SceneEntityCfg("robot", joint_names=[
-            "FL_hip_joint", "FR_hip_joint", "RL_hip_joint",
-            "RR_hip_joint", "FL_thigh_joint", "FR_thigh_joint",
-            "RL_thigh_joint", "RR_thigh_joint", "FL_calf_joint",
-            "FR_calf_joint", "RL_calf_joint", "RR_calf_joint",
-        ])}
+        params={"asset_cfg": SceneEntityCfg("robot", joint_names=list(LEG_JOINT_NAMES), preserve_order=True)}
     )
     ref_dof_legs = RewTerm(
         func=mdp.ref_dof_leg,
@@ -956,27 +909,19 @@ class RewardsCfg:
             "asset_cfg": SceneEntityCfg("robot"),
             "command_name": "locomotion_commands",
             "target_height": 0.08,
-            "all_feet": False,
+            "all_feet": True,
         }
     )
     xy_ang_vel = RewTerm(func=mdp.ang_vel_xy_l2, weight=-0.02)
     dof_acc_legs = RewTerm(
         func=mdp.joint_acc_l2,
         weight=-2.5e-7,
-        params={"asset_cfg": SceneEntityCfg("robot", joint_names=[
-            "FL_hip_joint", "FR_hip_joint", "RL_hip_joint", "RR_hip_joint",
-            "FL_thigh_joint", "FR_thigh_joint", "RL_thigh_joint", "RR_thigh_joint",
-            "FL_calf_joint", "FR_calf_joint", "RL_calf_joint", "RR_calf_joint"
-        ])}
+        params={"asset_cfg": SceneEntityCfg("robot", joint_names=list(LEG_JOINT_NAMES), preserve_order=True)}
     )
     dof_vel_legs = RewTerm(
         func=mdp.joint_vel_l2,
         weight=-8.0e-4,
-        params={"asset_cfg": SceneEntityCfg("robot", joint_names=[
-            "FL_hip_joint", "FR_hip_joint", "RL_hip_joint", "RR_hip_joint",
-            "FL_thigh_joint", "FR_thigh_joint", "RL_thigh_joint", "RR_thigh_joint",
-            "FL_calf_joint", "FR_calf_joint", "RL_calf_joint", "RR_calf_joint"
-        ])}
+        params={"asset_cfg": SceneEntityCfg("robot", joint_names=list(LEG_JOINT_NAMES), preserve_order=True)}
     )
     collision_penalty = RewTerm(
         func=mdp.undesired_contacts,
@@ -991,29 +936,23 @@ class RewardsCfg:
     dof_pos_limit = RewTerm(
         func=mdp.joint_pos_limits,
         weight=-10.0,
-        params={"asset_cfg": SceneEntityCfg("robot", joint_names=[
-            "FL_hip_joint", "FR_hip_joint", "RL_hip_joint", "RR_hip_joint",
-            "FL_thigh_joint", "FR_thigh_joint", "RL_thigh_joint", "RR_thigh_joint",
-            "FL_calf_joint", "FR_calf_joint", "RL_calf_joint", "RR_calf_joint",
-        ])}
+        params={"asset_cfg": SceneEntityCfg("robot", joint_names=list(LEG_JOINT_NAMES), preserve_order=True)}
     )
     torque_limit = RewTerm(
         func=mdp.soft_torque_limits,
         weight=-0.005,
-        params={"asset_cfg": SceneEntityCfg("robot", joint_names=[
-            "FL_hip_joint", "FR_hip_joint", "RL_hip_joint", "RR_hip_joint",
-            "FL_thigh_joint", "FR_thigh_joint", "RL_thigh_joint", "RR_thigh_joint",
-            "FL_calf_joint", "FR_calf_joint", "RL_calf_joint", "RR_calf_joint",
-        ]),
+        params={"asset_cfg": SceneEntityCfg("robot", joint_names=list(LEG_JOINT_NAMES), preserve_order=True),
             "soft_limit": 0.9
         }
     )
     hip_pos = RewTerm(
         func=mdp.joint_deviation_l2,
         weight=-0.5,
-        params={"asset_cfg": SceneEntityCfg("robot", joint_names=[
-            "FL_hip_joint", "FR_hip_joint", "RL_hip_joint", "RR_hip_joint"
-        ])}
+        params={"asset_cfg": SceneEntityCfg(
+            "robot",
+            joint_names=["FL_hip_joint", "FR_hip_joint", "RL_hip_joint", "RR_hip_joint"],
+            preserve_order=True,
+        )}
     )
     feet_drag = RewTerm(
         func=mdp.feet_drag,
@@ -1028,13 +967,13 @@ class RewardsCfg:
         weight=-0.001,
         params={
             "sensor_cfg": SceneEntityCfg("contact_feet_forces"),
-            "max_contact_force": 150.0,
+            "max_contact_force": 240.0,
         }
     )
     base_height = RewTerm(
         func=mdp.base_height_l2,
         weight=-2.0,
-        params={"target_height": 0.40}
+        params={"target_height": 0.50}
     )
     feet_pos_xy = RewTerm(
         func=mdp.feet_pos_xy,
@@ -1067,7 +1006,7 @@ class TerminationsCfg:
         func=mdp.root_height_below_minimum,
         params={
             "asset_cfg": SceneEntityCfg("robot"),
-            "minimum_height": 0.05,
+            "minimum_height": 0.20,
         },
     )
     # (4) Robot orientation out of bounds (roll/pitch limits)

@@ -27,14 +27,14 @@ class LegTorqueMetricsCommand(CommandTerm):
         self._command = torch.zeros((self.num_envs, 1), device=self.device)
 
         self._asset = env.scene[cfg.asset_name]
-        self._front_leg_joint_ids = self._asset.find_joints(list(cfg.front_leg_joint_names))[0]
-        self._rear_leg_joint_ids = self._asset.find_joints(list(cfg.rear_leg_joint_names))[0]
-        self._front_hip_joint_ids = self._asset.find_joints(list(cfg.front_hip_joint_names))[0]
-        self._front_thigh_joint_ids = self._asset.find_joints(list(cfg.front_thigh_joint_names))[0]
-        self._front_calf_joint_ids = self._asset.find_joints(list(cfg.front_calf_joint_names))[0]
-        self._rear_hip_joint_ids = self._asset.find_joints(list(cfg.rear_hip_joint_names))[0]
-        self._rear_thigh_joint_ids = self._asset.find_joints(list(cfg.rear_thigh_joint_names))[0]
-        self._rear_calf_joint_ids = self._asset.find_joints(list(cfg.rear_calf_joint_names))[0]
+        self._front_leg_joint_ids = self._asset.find_joints(list(cfg.front_leg_joint_names), preserve_order=True)[0]
+        self._rear_leg_joint_ids = self._asset.find_joints(list(cfg.rear_leg_joint_names), preserve_order=True)[0]
+        self._front_hip_joint_ids = self._asset.find_joints(list(cfg.front_hip_joint_names), preserve_order=True)[0]
+        self._front_thigh_joint_ids = self._asset.find_joints(list(cfg.front_thigh_joint_names), preserve_order=True)[0]
+        self._front_calf_joint_ids = self._asset.find_joints(list(cfg.front_calf_joint_names), preserve_order=True)[0]
+        self._rear_hip_joint_ids = self._asset.find_joints(list(cfg.rear_hip_joint_names), preserve_order=True)[0]
+        self._rear_thigh_joint_ids = self._asset.find_joints(list(cfg.rear_thigh_joint_names), preserve_order=True)[0]
+        self._rear_calf_joint_ids = self._asset.find_joints(list(cfg.rear_calf_joint_names), preserve_order=True)[0]
 
         self.metrics["front_mean_util"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["rear_mean_util"] = torch.zeros(self.num_envs, device=self.device)
