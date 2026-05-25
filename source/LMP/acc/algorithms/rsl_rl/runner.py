@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import os
+import inspect
 import warnings
 import torch
 
@@ -80,6 +81,7 @@ class OnPolicyRunnerAdaptation(OnPolicyRunner):
                 f"Unsupported algorithm.class_name='{alg_class_name}'. Use 'PPOAdaptation' for adaptation training."
             )
 
+        self._filter_unsupported_algorithm_cfg(alg_cls)
         alg = alg_cls(policy, device=self.device, **self.alg_cfg, multi_gpu_cfg=self.multi_gpu_cfg)
 
         alg.init_storage(
@@ -91,6 +93,28 @@ class OnPolicyRunnerAdaptation(OnPolicyRunner):
         )
 
         return alg
+
+    def _filter_unsupported_algorithm_cfg(self, alg_cls):
+        """Drop config fields that are not accepted by the installed rsl_rl algorithm."""
+        signature = inspect.signature(alg_cls.__init__)
+        accepted = {
+            name
+            for name, parameter in signature.parameters.items()
+            if parameter.kind is not inspect.Parameter.VAR_KEYWORD
+        }
+        if any(parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in signature.parameters.values()):
+            accepted.update(inspect.signature(PPOAdaptation.__mro__[1].__init__).parameters)
+
+        for key in list(self.alg_cfg):
+            if key in accepted:
+                continue
+            value = self.alg_cfg.pop(key)
+            if key == "optimizer" and value == "adam":
+                continue
+            warnings.warn(
+                f"Ignoring unsupported algorithm config '{key}={value}' for installed rsl_rl.",
+                stacklevel=2,
+            )
 
     def save(self, path: str, infos=None):
         saved_dict = {
