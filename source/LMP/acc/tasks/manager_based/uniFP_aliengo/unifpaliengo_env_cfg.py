@@ -54,7 +54,7 @@ FORCE_COMMAND_START_STEPS = 8000 * 24  # 启用力命令的训练步数阈值
 BASE_EXT_FULL_RANGE = (-65.0, 65.0)  # A2 base力的完整范围
 BASE_FORCE_KD = 160.0
 POLICY_OBS_DELAY_RANGE_STEPS = (0, 2)  # policy观测延迟范围（env steps）
-LEG_ACTION_DELAY_RANGE_STEPS = (0, 1)  # 腿部动作延迟范围（env steps）
+LEG_ACTION_DELAY_RANGE_STEPS = (0, 2)  # 腿部动作延迟范围（env steps）
 
 
 def make_policy_obs_delay_modifier_cfg() -> modifier_utils.ModifierCfg:
@@ -195,7 +195,7 @@ class UniFPTerrainCfg(TerrainGeneratorCfg):
     sub_terrains = {
         "rough_flat": hf_gen_cfg.HfRandomUniformTerrainCfg(
             proportion=1.0,
-            noise_range=(0.00, 0.03),  # 高度噪声范围 (米)
+            noise_range=(0.00, 0.05),  # 高度噪声范围 (米)
             noise_step=0.005,
             border_width=0.0,
         )
@@ -319,7 +319,7 @@ class UniFPSceneCfg(InteractiveSceneCfg):
                 velocity_limit_sim=22.0,
                 stiffness=140.0,
                 damping=5.0,
-                armature=0.0,
+                armature=0.03,
             ),
             "thighs": ImplicitActuatorCfg(
                 joint_names_expr=[
@@ -329,7 +329,7 @@ class UniFPSceneCfg(InteractiveSceneCfg):
                 velocity_limit_sim=22.0,
                 stiffness=140.0,
                 damping=5.0,
-                armature=0.0,
+                armature=0.03,
             ),
             "calfs": ImplicitActuatorCfg(
                 joint_names_expr=[
@@ -339,7 +339,7 @@ class UniFPSceneCfg(InteractiveSceneCfg):
                 velocity_limit_sim=14.6667,
                 stiffness=220.0,
                 damping=9.0,
-                armature=0.0,
+                armature=0.03,
             ),
         },
 
@@ -908,7 +908,7 @@ class RewardsCfg:
         params={
             "asset_cfg": SceneEntityCfg("robot"),
             "command_name": "locomotion_commands",
-            "target_height": 0.08,
+            "target_height": 0.13,
             "all_feet": True,
         }
     )
@@ -983,7 +983,7 @@ class RewardsCfg:
     feet_height_high = RewTerm(
         func=mdp.feet_height_high,
         weight=-15.0,
-        params={"asset_cfg": SceneEntityCfg("robot"), "height_threshold": 0.15}
+        params={"asset_cfg": SceneEntityCfg("robot"), "height_threshold": 0.22}
     )
 
 
@@ -1002,19 +1002,19 @@ class TerminationsCfg:
         },
     )"""
     # (3) Base_height below minimum
-    base_height = DoneTerm(
+    """base_height = DoneTerm(
         func=mdp.root_height_below_minimum,
         params={
             "asset_cfg": SceneEntityCfg("robot"),
             "minimum_height": 0.20,
         },
-    )
+    )"""
     # (4) Robot orientation out of bounds (roll/pitch limits)
     bad_orientation = DoneTerm(
         func=mdp.bad_orientation,
         params={
             "asset_cfg": SceneEntityCfg("robot"),
-            "limit_angle": 0.8,
+            "limit_angle": 0.9,
         },
     )
 

@@ -13,6 +13,11 @@
 
 结论：训练用 active path 的硬迁移项基本正确落实，没有发现会直接导致 A2 body/joint lookup 失败、policy I/O 维度变化、或足端顺序错位的 blocker。仍有若干低风险项和训练基线参数需要后续 rollout/训练结果确认。
 
+## Version History
+
+- v1, recorded `2026-05-22 19:49:13 HKT`: A2 初始迁移基线。该版本完成 A2 asset/body/joint/foot 顺序迁移，并保留基础训练设置：`BASE_EXT_FULL_RANGE=(-65.0, 65.0)`、`BASE_FORCE_KD=160.0`、A2 actuator limits、PD v1 `hip/thigh=140.0/5.0`、`calf=220.0/9.0`、terrain `noise_range=(0.00, 0.03)`、leg action delay `(0, 1)`、feet height target `0.08`、feet high threshold `0.15`。
+- v2, recorded `2026-05-22 19:49:13 HKT`: 在 v1 上增加当前增强项：`armature=0.03`、terrain `noise_range=(0.00, 0.05)`、leg action delay `(0, 2)`、feet height target `0.13`、feet high threshold `0.22`。其余未列参数继承 v1。
+
 ## Implemented Correctly
 
 ### Shared Robot Contract
@@ -61,9 +66,10 @@
 - A2 actuator nominal limits 已按 URDF 落实：
   - hip/thigh: `effort_limit_sim=120.0`, `velocity_limit_sim=22.0`
   - calf: `effort_limit_sim=180.0`, `velocity_limit_sim=14.6667`
-- PD gain 暂保留当前基线：
-  - hip/thigh: `stiffness=100.0`, `damping=3.5`
-  - calf: `stiffness=160.0`, `damping=7.0`
+- PD v1 baseline 已更新为：
+  - hip/thigh: `stiffness=140.0`, `damping=5.0`
+  - calf: `stiffness=220.0`, `damping=9.0`
+- v2 已同步 MuJoCo A2 XML 的 joint armature：hip/thigh/calf 均为 `armature=0.03`。
 - `BASE_EXT_FULL_RANGE = (-65.0, 65.0)`，`BASE_FORCE_KD = 160.0` 已落实，并被 locomotion command、tracking reward、privileged base velocity offset 使用。
 - training gait 主配置保持 open-loop trot：
   - `gait_frequency=2.0`
@@ -136,9 +142,10 @@
 
 以下项目不是迁移正确性 blocker，但当前只是 A2 初始基线，需要通过 rollout、训练曲线和指标再调：
 
-- actuator PD：
-  - hip/thigh `100.0 / 3.5`
-  - calf `160.0 / 7.0`
+- actuator PD / inertia:
+  - v1 hip/thigh `140.0 / 5.0`
+  - v1 calf `220.0 / 9.0`
+  - v2 armature `0.03`
   - gain randomization `0.9~1.1`
 - torque utilization：
   - A2 `120 / 180 Nm` limit 是否导致 torque_limit penalty 过强或过弱
@@ -151,6 +158,9 @@
 - mass / COM randomization：
   - base mass add `(0.0, 8.0)`
   - COM xyz `(-0.1, 0.1)`
+- terrain:
+  - v1 random uniform `noise_range=(0.00, 0.03)`
+  - v2 random uniform `noise_range=(0.00, 0.05)`
 - gait / ref dof：
   - `2 Hz`
   - `phase_offset=0.5`
@@ -161,13 +171,16 @@
 - height / contact rewards:
   - base height target `0.50`
   - termination min height `0.20`
-  - feet height target `0.08`
-  - feet high threshold `0.15`
+  - v1 feet height target `0.08`
+  - v1 feet high threshold `0.15`
+  - v2 feet height target `0.13`
+  - v2 feet high threshold `0.22`
   - max contact force `240.0`
   - binary contact threshold `1.5`
 - observations:
   - policy obs delay `(0,2)`
-  - leg action delay `(0,1)`
+  - v1 leg action delay `(0,1)`
+  - v2 leg action delay `(0,2)`
   - noise levels on base orientation / angular velocity / joint pos / joint vel
 
 ## Recommended Next Checks
