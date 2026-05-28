@@ -330,8 +330,8 @@ class UniFPSceneCfg(InteractiveSceneCfg):
                 ],
                 effort_limit_sim=35.0,
                 velocity_limit_sim=20.0,
-                stiffness=100.0,
-                damping=3.5,
+                stiffness=80.0,
+                damping=2.5,
                 armature=0.0,
             ),
             "thighs": ImplicitActuatorCfg(
@@ -340,8 +340,8 @@ class UniFPSceneCfg(InteractiveSceneCfg):
                 ],
                 effort_limit_sim=35.0,
                 velocity_limit_sim=20.0,
-                stiffness=100.0,
-                damping=3.5,
+                stiffness=80.0,
+                damping=2.5,
                 armature=0.0,
             ),
             "calfs": ImplicitActuatorCfg(
@@ -352,8 +352,8 @@ class UniFPSceneCfg(InteractiveSceneCfg):
                 effort_limit_sim=45.0,
                 # Aliengo URDF: Hip/Thigh max 20 rad/s, Calf 15.9 rad/s
                 velocity_limit_sim=15.0,
-                stiffness=160.0,
-                damping=7.0,
+                stiffness=120.0,
+                damping=4.5,
                 armature=0.0,
             ),
         },
@@ -799,7 +799,7 @@ class EventCfg:
         func=mdp.reset_joints_by_offset,
         mode="reset",
         params={
-            "position_range": (0.0, 0.0),
+            "position_range": (-0.1, 0.1),  # 关节位置偏移范围 (rad)
             "velocity_range": (0.0, 0.0),
             "asset_cfg": SceneEntityCfg("robot", joint_names=list(LEG_JOINT_NAMES)),
         },
@@ -869,7 +869,22 @@ class EventCfg:
     # ========== 间隔触发事件 (interval mode) ==========
     
     # 7. 推动机器人 - 每8秒施加一次随机速度
-    push_robot = None
+    push_robot = EventTerm(
+        func=mdp.push_by_setting_velocity_standInclude,
+        mode="interval",
+        interval_range_s=(8.0, 8.0),  # 每8秒触发一次
+        params={
+            "velocity_range": {
+                "x": (-0.3, 0.3),  # x方向速度范围 (m/s)
+                "y": (-0.3, 0.3),  # y方向速度范围 (m/s)
+            },
+            "asset_cfg": SceneEntityCfg("robot"),
+            "command_name": "locomotion_commands",
+            "standing_velocity_scale": 1.2,
+            "disable_after_step": FORCE_COMMAND_START_STEPS,
+            "disable_after_step_resume": FORCE_COMMAND_RESUME_STEPS,
+        },
+    )
 
 
 @configclass
@@ -1075,7 +1090,7 @@ class TerminationsCfg:
         func=mdp.bad_orientation,
         params={
             "asset_cfg": SceneEntityCfg("robot"),
-            "limit_angle": 0.8,
+            "limit_angle": 0.9,
         },
     )
 

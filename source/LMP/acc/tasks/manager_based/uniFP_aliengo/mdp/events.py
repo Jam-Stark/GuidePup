@@ -71,9 +71,20 @@ def push_by_setting_velocity_standInclude(
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
     command_name: str = "locomotion_commands",
     standing_velocity_scale: float = 1.0,
+    disable_after_step: int | None = None,
+    disable_after_step_resume: int = 0,
 ):
-    """Push asset by setting its root velocity with optional standing scaling."""
+    """Push asset by setting its root velocity with optional standing scaling.
+
+    If ``disable_after_step`` is provided, this event becomes a no-op once the global training step passes it.
+    """
     asset: Articulation | RigidObject = env.scene[asset_cfg.name]
+
+    if (
+        disable_after_step is not None
+        and env.common_step_counter + int(disable_after_step_resume) > int(disable_after_step)
+    ):
+        return
 
     if env_ids is None or env_ids == slice(None):
         env_ids_tensor = torch.arange(env.num_envs, device=asset.device)
