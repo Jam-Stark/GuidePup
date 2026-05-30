@@ -50,6 +50,11 @@ except ImportError:
 
 
 DEFAULT_DURATION_S = 60.0
+DEFAULT_POLICY_PATH = Path(
+    "logs/rsl_rl/uniFP_aliengo_position_force/"
+    "2026-05-28_18-32-30_new-setup-aliengo/"
+    "mujoco_exported/policy.pt"
+)
 BASE_FORCE_SCALE = 0.01
 BASE_FORCE_KD = 100.0
 LIN_VEL_X_CLIP = 0.1
@@ -1748,7 +1753,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=Path("resources/aliengo/mujoco/aliengo.xml"),
         help="Path to a MuJoCo-loadable URDF or MJCF model.",
     )
-    parser.add_argument("--policy-path", type=Path, required=True, help="Path to the MuJoCo-ready TorchScript policy.")
+    parser.add_argument(
+        "--policy-path",
+        type=Path,
+        default=DEFAULT_POLICY_PATH,
+        help="Path to the MuJoCo-ready TorchScript policy. Defaults to the latest new-setup Aliengo export.",
+    )
     parser.add_argument("--output-csv", type=str, default=None, help="Optional CSV output path.")
     parser.add_argument("--duration-s", type=float, default=DEFAULT_DURATION_S, help="Evaluation horizon in seconds.")
     parser.add_argument(
@@ -1797,7 +1807,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--human-guide-force-jitter-n", type=float, default=2.0)
     parser.add_argument("--human-guide-heading-jitter-deg", type=float, default=12.0)
     parser.add_argument("--human-guide-dropout-max-s", type=float, default=0.35)
-    parser.add_argument("--walking-gait-frequency", type=float, default=2.0)
+    parser.add_argument(
+        "--walking-gait-frequency",
+        type=float,
+        default=None,
+        help="Optional override for the gait frequency loaded from policy metadata.",
+    )
     parser.add_argument(
         "--gate-preset",
         type=str,
@@ -1876,7 +1891,8 @@ def main() -> int:
     metadata = load_policy_metadata(args.policy_path, fallback=default_smart_gait_metadata())
     if args.policy_history_length is not None:
         metadata = replace(metadata, history_length=int(args.policy_history_length))
-    metadata = replace(metadata, gait_frequency_hz=float(args.walking_gait_frequency))
+    if args.walking_gait_frequency is not None:
+        metadata = replace(metadata, gait_frequency_hz=float(args.walking_gait_frequency))
 
     base_nominal_cmd_vel_b = np.array([float(args.cmd_vx), float(args.cmd_vy), float(args.cmd_wz)], dtype=np.float32)
     initial_command_obs = build_command_vector(
