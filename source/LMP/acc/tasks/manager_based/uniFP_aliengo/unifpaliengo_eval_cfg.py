@@ -92,7 +92,7 @@ class UniFPAliengoReversePushEvalCfg(UniFPAliengoEnvCfg):
         self.scene.robot.actuators["calfs"].stiffness = 220.0
         self.scene.robot.actuators["calfs"].damping = 9.0
 
-        self.commands.gait_phase.gait_frequency = 3.0
+        self.commands.gait_phase.gait_frequency = 2.0
         self.commands.locomotion_commands.debug_vis = False
 
         self.commands.locomotion_commands.resampling_time_range = (1.0e9, 1.0e9)

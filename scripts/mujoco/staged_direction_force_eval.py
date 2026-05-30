@@ -34,7 +34,6 @@ from runtime import (
     reset_model_state,
     resolve_body_id,
     set_body_force,
-    StagedEvalTargetPositionCommand,
     summarize_joint_actuator_gains,
     update_runtime_state_after_step,
     world_to_base_yaw,
@@ -176,12 +175,12 @@ def resolve_output_csv(path_str: str | None) -> Path:
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Evaluate the UniFP Aliengo policy in MuJoCo under the staged-direction-force schedule."
+        description="Evaluate the A2 UniFP policy in MuJoCo under the staged-direction-force schedule."
     )
     parser.add_argument(
         "--model-path",
         type=Path,
-        default=Path("resources/aliengoZ1/mujoco/aliengoZ1.xml"),
+        default=Path("resources/a2_description/a2.xml"),
         help="Path to a MuJoCo-loadable URDF or MJCF model.",
     )
     parser.add_argument("--policy-path", type=Path, required=True, help="Path to the MuJoCo-ready TorchScript policy.")
@@ -198,7 +197,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--leg-action-delay-steps",
         type=int,
         default=0,
-        choices=(0, 1),
+        choices=(0, 1, 2),
         help="Fixed leg action delay in control steps.",
     )
     parser.add_argument("--headless", action="store_true", help="Run without the MuJoCo viewer.")
@@ -270,15 +269,24 @@ def write_csv_row(
     )
 
 
-def extract_force_estimator_outputs(pred_est: np.ndarray, base_force_tgt_local: np.ndarray) -> dict[str, np.ndarray | float]:
+def extract_force_estimator_outputs(
+    pred_est: np.ndarray,
+    base_force_tgt_local: np.ndarray,
+    *,
+    base_force_scale: float,
+) -> dict[str, np.ndarray | float]:
+    scale = max(float(base_force_scale), 1.0e-6)
     if pred_est.shape == (12,):
-        gripper_force_est_local = pred_est[6:9] / 0.01
-        base_force_est_local = pred_est[9:12] / 0.01
+        gripper_force_est_local = np.zeros(3, dtype=np.float32)
+        base_force_est_local = pred_est[9:12] / scale
     elif pred_est.shape == (6,):
         gripper_force_est_local = np.zeros(3, dtype=np.float32)
-        base_force_est_local = pred_est[3:6] / 0.01
+        base_force_est_local = pred_est[3:6] / scale
+    elif pred_est.shape == (3,):
+        gripper_force_est_local = np.zeros(3, dtype=np.float32)
+        base_force_est_local = pred_est / scale
     else:
-        raise RuntimeError(f"Expected pred_est shape (6,) or (12,), received {pred_est.shape}")
+        raise RuntimeError(f"Expected pred_est shape (3,), (6,), or (12,), received {pred_est.shape}")
 
     gripper_force_tgt_local = np.zeros(3, dtype=np.float32)
     base_force_err_l2 = float(np.linalg.norm(base_force_est_local - base_force_tgt_local))
@@ -305,16 +313,8 @@ def main() -> int:
     metadata = load_policy_metadata(args.policy_path, fallback=default_staged_eval_metadata())
     metadata = default_staged_eval_metadata() if metadata is None else metadata
     locomotion_cmd = parse_triplet(metadata.default_locomotion_cmd)
-    ee_command_schedule = StagedEvalTargetPositionCommand(
-        control_dt=metadata.control_dt,
-        steady_target_sphere=metadata.default_ee_sphere_cmd,
-    )
-    initial_ee_sphere_cmd = ee_command_schedule.current_sphere_command()
     initial_command_obs = build_command_vector(
         locomotion_cmd=locomotion_cmd,
-        ee_sphere_cmd=initial_ee_sphere_cmd,
-        gripper_force_cmd=metadata.default_gripper_force_cmd,
-        base_force_cmd=metadata.default_base_force_cmd,
         metadata=metadata,
     )
 
@@ -325,7 +325,7 @@ def main() -> int:
         return 2
 
     bindings = create_model_bindings(model, metadata)
-    trunk_body_id = resolve_body_id(model, "trunk")
+    base_body_id = resolve_body_id(model, metadata.base_body_name)
     apply_joint_actuator_gains(model, bindings, metadata)
     policy = load_torchscript_policy(args.policy_path)
 
@@ -343,12 +343,12 @@ def main() -> int:
     print(
         "[INFO] Runtime config: "
         f"gait_frequency_hz={metadata.gait_frequency_hz:.3f} "
+        f"model_timestep={model.opt.timestep:.4f} "
+        f"control_dt={metadata.control_dt:.4f} "
         f"obs_delay_steps={args.obs_delay_steps} "
         f"leg_action_delay_steps={args.leg_action_delay_steps} "
-        f"freeze_arm_actions={int(metadata.freeze_arm_actions)} "
-        f"actuator_gains={summarize_joint_actuator_gains(metadata)} "
-        f"ee_sphere_cmd_reset={tuple(float(v) for v in initial_ee_sphere_cmd)} "
-        f"ee_sphere_cmd_steady={tuple(float(v) for v in metadata.default_ee_sphere_cmd)}"
+        f"base_body_name={metadata.base_body_name} "
+        f"actuator_gains={summarize_joint_actuator_gains(metadata)}"
     )
     print(f"[INFO] CSV output: {output_csv}")
 
@@ -421,7 +421,7 @@ def main() -> int:
         base_quat = data.qpos[3:7].astype(np.float64, copy=True)
 
         scheduler_outputs = scheduler.update(base_quat, root_pos_xy, time_s)
-        set_body_force(data, trunk_body_id, scheduler_outputs["force_w"])
+        set_body_force(data, base_body_id, scheduler_outputs["force_w"])
 
         axis_xy = np.asarray(scheduler_outputs["axis_xy"], dtype=np.float32)
         block_start_root_xy = np.asarray(scheduler_outputs["block_start_root_xy"], dtype=np.float32)
@@ -449,6 +449,7 @@ def main() -> int:
         estimator_outputs = extract_force_estimator_outputs(
             pred_est.astype(np.float32),
             world_to_base_yaw(np.asarray(scheduler_outputs["force_w"], dtype=np.float32), base_quat),
+            base_force_scale=metadata.base_force_scale,
         )
 
         write_csv_row(
@@ -497,7 +498,7 @@ def main() -> int:
             )
 
         target_joint_pos = build_target_joint_positions(action, runtime_state, metadata)
-        apply_control_targets(data, bindings, target_joint_pos)
+        apply_control_targets(model, data, bindings, target_joint_pos, metadata)
 
         wall_start = time.perf_counter()
         try:
@@ -508,9 +509,6 @@ def main() -> int:
 
         next_command_obs = build_command_vector(
             locomotion_cmd=locomotion_cmd,
-            ee_sphere_cmd=ee_command_schedule.current_sphere_command(),
-            gripper_force_cmd=metadata.default_gripper_force_cmd,
-            base_force_cmd=metadata.default_base_force_cmd,
             metadata=metadata,
         )
         update_runtime_state_after_step(
@@ -521,8 +519,6 @@ def main() -> int:
             action=action,
             command_obs=next_command_obs,
         )
-        ee_command_schedule.advance()
-
         if args.real_time:
             sleep_time = metadata.control_dt - (time.perf_counter() - wall_start)
             if sleep_time > 0.0:
@@ -542,7 +538,7 @@ def main() -> int:
                 return 3
             with mujoco_viewer.launch_passive(model, data) as viewer:
                 with viewer.lock():
-                    configure_tracking_viewer_camera(mujoco, viewer, data, track_body_id=trunk_body_id)
+                    configure_tracking_viewer_camera(mujoco, viewer, data, track_body_id=base_body_id)
                 viewer.sync()
                 for step in range(max_steps):
                     if not viewer.is_running():
@@ -555,9 +551,9 @@ def main() -> int:
                         mujoco,
                         viewer,
                         data,
-                        trunk_body_id=trunk_body_id,
+                        base_body_id=base_body_id,
                         command_vel_xy=locomotion_cmd[:2],
-                        external_force_w=data.xfrc_applied[trunk_body_id, :3],
+                        external_force_w=data.xfrc_applied[base_body_id, :3],
                         force_arrow_z_extra_offset=0.05,
                     )
                     viewer.sync()

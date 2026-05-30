@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from model_loader import load_mujoco_model_from_path
+from runtime import default_runtime_metadata, load_policy_metadata
 
 
 def has_module(name: str) -> bool:
@@ -19,7 +20,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--model-path",
         type=Path,
-        default=Path("resources/aliengo/mujoco/aliengo.xml"),
+        default=Path("resources/a2_description/a2.xml"),
         help="Path to a MuJoCo-loadable URDF or MJCF model.",
     )
     parser.add_argument(
@@ -51,17 +52,7 @@ def main() -> int:
         print(f"Model path does not exist: {model_path}")
         return 2
 
-    try:
-        model = load_mujoco_model_from_path(mujoco, model_path)
-    except Exception as exc:
-        print(f"MuJoCo failed to load the model: {exc}")
-        return 3
-
-    print(f"Loaded model: {model_path}")
-    print(f"nq={model.nq} nv={model.nv} nu={model.nu} nbody={model.nbody} njnt={model.njnt}")
-    if model.nu == 0:
-        print("Warning: model has no actuators. Policy playback will not work until actuators are added.")
-
+    metadata = default_runtime_metadata()
     if args.policy_path is not None:
         policy_path = args.policy_path.resolve()
         if not policy_path.exists():
@@ -79,6 +70,21 @@ def main() -> int:
         except Exception as exc:
             print(f"Failed to load TorchScript policy: {exc}")
             return 6
+        metadata = load_policy_metadata(policy_path, fallback=metadata)
+
+    try:
+        model = load_mujoco_model_from_path(mujoco, model_path)
+    except Exception as exc:
+        print(f"MuJoCo failed to load the model: {exc}")
+        return 3
+
+    print(f"Loaded model: {model_path}")
+    print(
+        f"nq={model.nq} nv={model.nv} nu={model.nu} nbody={model.nbody} njnt={model.njnt} "
+        f"model_timestep={model.opt.timestep:.4f} control_dt={metadata.control_dt:.4f}"
+    )
+    if model.nu == 0:
+        print("Warning: model has no actuators. Policy playback will not work until actuators are added.")
 
     return 0
 

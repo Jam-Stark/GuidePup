@@ -51,7 +51,7 @@ except ImportError:
 
 DEFAULT_DURATION_S = 60.0
 BASE_FORCE_SCALE = 0.01
-BASE_FORCE_KD = 100.0
+BASE_FORCE_KD = 160.0
 LIN_VEL_X_CLIP = 0.1
 LIN_VEL_Y_CLIP = 0.1
 ANG_VEL_YAW_CLIP = 0.2
@@ -1745,7 +1745,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--model-path",
         type=Path,
-        default=Path("resources/aliengo/mujoco/aliengo.xml"),
+        default=Path("resources/a2_description/a2.xml"),
         help="Path to a MuJoCo-loadable URDF or MJCF model.",
     )
     parser.add_argument("--policy-path", type=Path, required=True, help="Path to the MuJoCo-ready TorchScript policy.")
@@ -1852,7 +1852,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--brake-gate-hold-steps", type=int, default=BRAKE_GATE_HOLD_STEPS)
     parser.add_argument("--base-force-scale", type=float, default=BASE_FORCE_SCALE)
     parser.add_argument("--obs-delay-steps", type=int, default=0, choices=(0, 1, 2))
-    parser.add_argument("--leg-action-delay-steps", type=int, default=0, choices=(0, 1))
+    parser.add_argument("--leg-action-delay-steps", type=int, default=0, choices=(0, 1, 2))
     parser.add_argument("--seed", type=int, default=0, help="Seed used by the human-guide schedule randomization.")
     parser.add_argument("--log-interval", type=int, default=60)
     parser.add_argument("--headless", action="store_true")
@@ -1891,7 +1891,7 @@ def main() -> int:
         return 2
 
     bindings = create_model_bindings(model, metadata)
-    trunk_body_id = resolve_body_id(model, "trunk")
+    base_body_id = resolve_body_id(model, metadata.base_body_name)
     apply_joint_actuator_gains(model, bindings, metadata)
     policy = load_torchscript_policy(args.policy_path)
 
@@ -1935,6 +1935,8 @@ def main() -> int:
         f"per_frame_obs_dim={metadata.per_frame_obs_dim} "
         f"action_dim={metadata.action_dim} "
         f"gait_frequency_hz={metadata.gait_frequency_hz:.3f} "
+        f"model_timestep={model.opt.timestep:.4f} "
+        f"control_dt={metadata.control_dt:.4f} "
         f"obs_delay_steps={args.obs_delay_steps} "
         f"leg_action_delay_steps={args.leg_action_delay_steps} "
         f"actuator_gains={summarize_joint_actuator_gains(metadata)}"
@@ -2076,7 +2078,7 @@ def main() -> int:
         last_nominal_cmd_vel_b = guidance_state.effective_cmd_vel_b.astype(np.float32, copy=True)
         last_external_force_w = applied_force_w.astype(np.float32, copy=True)
         if float(np.linalg.norm(applied_force_w)) > 1.0e-6:
-            set_body_force(data, trunk_body_id, applied_force_w)
+            set_body_force(data, base_body_id, applied_force_w)
         else:
             clear_body_forces(data)
 
@@ -2093,7 +2095,7 @@ def main() -> int:
         mode_counts[mode_state.mode] += 1
 
         target_joint_pos = build_target_joint_positions(action, runtime_state, metadata)
-        apply_control_targets(data, bindings, target_joint_pos)
+        apply_control_targets(model, data, bindings, target_joint_pos, metadata)
 
         wall_start = time.perf_counter()
         try:
@@ -2176,7 +2178,7 @@ def main() -> int:
                 print("MuJoCo viewer is unavailable in this environment. Re-run with --headless.", file=sys.stderr)
                 return 3
             with mujoco_viewer.launch_passive(model, data) as viewer:
-                configure_tracking_viewer_camera(mujoco, viewer, data, track_body_id=trunk_body_id)
+                configure_tracking_viewer_camera(mujoco, viewer, data, track_body_id=base_body_id)
                 for step in range(max_steps):
                     if not viewer.is_running():
                         break
@@ -2185,7 +2187,7 @@ def main() -> int:
                         mujoco,
                         viewer,
                         data,
-                        trunk_body_id=trunk_body_id,
+                        base_body_id=base_body_id,
                         command_vel_xy=last_nominal_cmd_vel_b[:2],
                         external_force_w=last_external_force_w,
                         force_arrow_z_extra_offset=0.05,

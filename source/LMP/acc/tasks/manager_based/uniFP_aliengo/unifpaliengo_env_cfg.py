@@ -80,7 +80,7 @@ class CommandsCfg:
         """Configuration for base locomotion commands."""
 
         class_type = ExtendedUniformVelocityCommand
-        resampling_time_range: Tuple[float, float] = (5.0, 5.0)
+        resampling_time_range: Tuple[float, float] = (4.0, 8.0)
         heading_command: bool = False
         rel_standing_envs: float = 0.3
 
@@ -193,8 +193,14 @@ class UniFPTerrainCfg(TerrainGeneratorCfg):
     
     # 子地形配置
     sub_terrains = {
+        "flat": hf_gen_cfg.HfRandomUniformTerrainCfg(
+            proportion=0.4,
+            noise_range=(0.0, 0.0),
+            noise_step=0.005,
+            border_width=0.0,
+        ),
         "rough_flat": hf_gen_cfg.HfRandomUniformTerrainCfg(
-            proportion=1.0,
+            proportion=0.6,
             noise_range=(0.00, 0.05),  # 高度噪声范围 (米)
             noise_step=0.005,
             border_width=0.0,

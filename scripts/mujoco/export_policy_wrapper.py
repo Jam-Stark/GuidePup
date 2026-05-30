@@ -31,8 +31,8 @@ parser.add_argument(
 parser.add_argument(
     "--walking-gait-frequency",
     type=float,
-    default=None,
-    help="Optional override for the gait frequency recorded in the exported smart-gait metadata.",
+    default=2.0,
+    help="Gait frequency for the Isaac export-validation env; exported A2 metadata records the same value.",
 )
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
@@ -52,6 +52,7 @@ from isaaclab_rl.rsl_rl import RslRlVecEnvWrapper
 
 from acc.algorithms.rsl_rl.runner import OnPolicyRunnerAdaptation
 from acc.tasks.manager_based.uniFP_aliengo.agents.rsl_rl_ppo_cfg import PPORunnerCfg
+from acc.tasks.manager_based.uniFP_aliengo.robot_constants import BASE_BODY_NAME, LEG_JOINT_NAMES
 from acc.tasks.manager_based.uniFP_aliengo.unifpaliengo_eval_cfg import UniFPAliengoReversePushEvalCfg
 
 from runtime import default_smart_gait_metadata
@@ -87,8 +88,7 @@ def build_env_cfg() -> UniFPAliengoReversePushEvalCfg:
     env_cfg.seed = args_cli.seed
     if args_cli.device is not None:
         env_cfg.sim.device = args_cli.device
-    if args_cli.walking_gait_frequency is not None:
-        env_cfg.commands.gait_phase.gait_frequency = float(args_cli.walking_gait_frequency)
+    env_cfg.commands.gait_phase.gait_frequency = float(args_cli.walking_gait_frequency)
     if args_cli.policy_history_length is not None:
         if int(args_cli.policy_history_length) <= 0:
             raise ValueError(
@@ -117,6 +117,17 @@ def validate_export(policy_model, exported_policy, obs, label: str) -> tuple[flo
     pred_err = torch.max(torch.abs(expected_pred - actual_pred)).item()
     print(f"[CHECK][{label}] action_max_abs_err={action_err:.3e} pred_max_abs_err={pred_err:.3e}")
     return action_err, pred_err
+
+
+def read_a2_default_joint_pos(env: ManagerBasedRLEnv) -> tuple[float, ...]:
+    robot = env.scene["robot"]
+    joint_ids, _ = robot.find_joints(list(LEG_JOINT_NAMES), preserve_order=True)
+    if len(joint_ids) != len(LEG_JOINT_NAMES):
+        raise RuntimeError(
+            f"Expected {len(LEG_JOINT_NAMES)} A2 leg joints, resolved {len(joint_ids)} from Isaac articulation."
+        )
+    default_joint_pos = robot.data.default_joint_pos[0, joint_ids].detach().cpu().tolist()
+    return tuple(float(v) for v in default_joint_pos)
 
 
 def main() -> None:
@@ -165,12 +176,22 @@ def main() -> None:
     if max_err > 1.0e-5:
         raise RuntimeError(f"Export validation failed: max absolute error {max_err:.3e} exceeds tolerance 1e-5.")
 
+    default_joint_pos = read_a2_default_joint_pos(env)
+    base_metadata = default_smart_gait_metadata()
     metadata = replace(
-        default_smart_gait_metadata(),
+        base_metadata,
+        joint_names=tuple(LEG_JOINT_NAMES),
+        obs_joint_names=tuple(LEG_JOINT_NAMES),
+        default_joint_pos=default_joint_pos,
+        obs_default_joint_pos=default_joint_pos,
         action_dim=int(actions.shape[-1]),
         per_frame_obs_dim=int(policy_model.curr_obs_dim),
         history_length=int(policy_model.history_num_frames),
-        gait_frequency_hz=float(env_cfg.commands.gait_phase.gait_frequency),
+        gait_frequency_hz=float(args_cli.walking_gait_frequency),
+        base_body_name=BASE_BODY_NAME,
+        root_init_pos=base_metadata.root_init_pos,
+        root_init_quat=base_metadata.root_init_quat,
+        joint_actuator_gains=base_metadata.joint_actuator_gains,
     )
     metadata.write_json(metadata_output_path)
 

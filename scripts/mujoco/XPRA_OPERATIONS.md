@@ -1,6 +1,6 @@
 # MuJoCo Xpra Operations
 
-This document records the working Xpra-based remote visualization workflow for the MuJoCo sim2sim runner.
+This document records the working Xpra-based remote visualization workflow for the A2 MuJoCo sim2sim runner.
 
 Assumptions:
 
@@ -8,7 +8,8 @@ Assumptions:
 - conda environment name is `mujoco`
 - Xpra display is fixed to `:100`
 - Xpra HTML5 port is fixed to `14500`
-- the MuJoCo model is `resources/aliengoZ1/mujoco/aliengoZ1.xml`
+- the MuJoCo model is `resources/a2_description/a2.xml`
+- the A2 root body is `base_link`; body-force/camera overlays use metadata from `policy.json`
 - Ubuntu package `xpra` version is `3.1.5`
 
 Important compatibility note:
@@ -22,14 +23,14 @@ Important compatibility note:
 Check the basic runtime:
 
 ```bash
-python scripts/mujoco/check_setup.py --model-path resources/aliengoZ1/mujoco/aliengoZ1.xml
+python scripts/mujoco/check_setup.py --model-path resources/a2_description/a2.xml
 ```
 
 Check a TorchScript policy file before launching visualization:
 
 ```bash
 python scripts/mujoco/check_setup.py \
-  --model-path resources/aliengoZ1/mujoco/aliengoZ1.xml \
+  --model-path resources/a2_description/a2.xml \
   --policy-path /absolute/path/to/policy.pt
 ```
 
@@ -37,7 +38,7 @@ Run a short headless smoke test:
 
 ```bash
 python scripts/mujoco/play_policy.py \
-  --model-path resources/aliengoZ1/mujoco/aliengoZ1.xml \
+  --model-path resources/a2_description/a2.xml \
   --headless \
   --duration-s 0.1
 ```
@@ -89,7 +90,7 @@ Recommended helper:
 ```bash
 bash scripts/mujoco/run_in_xpra.sh \
   python scripts/mujoco/play_policy.py \
-  --model-path resources/aliengoZ1/mujoco/aliengoZ1.xml \
+  --model-path resources/a2_description/a2.xml \
   --policy-path /absolute/path/to/policy.pt \
   --duration-s 3600 \
   --real-time
@@ -105,7 +106,7 @@ export LIBGL_ALWAYS_SOFTWARE=1
 export MESA_LOADER_DRIVER_OVERRIDE=llvmpipe
 export PYTHONUNBUFFERED=1
 conda run -n mujoco python scripts/mujoco/play_policy.py \
-  --model-path resources/aliengoZ1/mujoco/aliengoZ1.xml \
+  --model-path resources/a2_description/a2.xml \
   --policy-path /absolute/path/to/policy.pt \
   --duration-s 3600 \
   --real-time
@@ -237,8 +238,8 @@ pgrep -af "scripts/mujoco/play_policy.py|scripts/mujoco/staged_direction_force_e
 If MuJoCo crashes on startup, re-run the non-visual checks:
 
 ```bash
-python scripts/mujoco/check_setup.py --model-path resources/aliengoZ1/mujoco/aliengoZ1.xml
-python scripts/mujoco/play_policy.py --model-path resources/aliengoZ1/mujoco/aliengoZ1.xml --headless --duration-s 0.1
+python scripts/mujoco/check_setup.py --model-path resources/a2_description/a2.xml
+python scripts/mujoco/play_policy.py --model-path resources/a2_description/a2.xml --headless --duration-s 0.1
 ```
 
 If the model opens but performance is poor, this is expected for the current software-rendering baseline.

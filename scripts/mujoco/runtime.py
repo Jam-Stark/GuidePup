@@ -58,10 +58,10 @@ def _default_obs_joint_names() -> tuple[str, ...]:
 
 def _default_joint_positions() -> tuple[float, ...]:
     return (
-        0.1,
-        -0.1,
-        0.1,
-        -0.1,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
         0.5,
         0.5,
         0.5,
@@ -75,10 +75,10 @@ def _default_joint_positions() -> tuple[float, ...]:
 
 def _default_obs_joint_positions() -> tuple[float, ...]:
     return (
-        0.1,
-        -0.1,
-        0.1,
-        -0.1,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
         0.5,
         0.5,
         0.5,
@@ -90,7 +90,13 @@ def _default_obs_joint_positions() -> tuple[float, ...]:
     )
 
 def _default_joint_actuator_gains() -> dict[str, tuple[float, float]]:
-    return {}
+    gains: dict[str, tuple[float, float]] = {}
+    for joint_name in _default_joint_names():
+        if "_calf_" in joint_name:
+            gains[joint_name] = (220.0, 9.0)
+        else:
+            gains[joint_name] = (140.0, 5.0)
+    return gains
 
 
 @dataclass(frozen=True)
@@ -106,12 +112,17 @@ class UniFPPolicyMetadata:
     history_length: int = 32
     sim_dt: float = 1.0 / 200.0
     control_decimation: int = 4
-    gait_frequency_hz: float = 3.0
+    gait_frequency_hz: float = 2.0
     joint_vel_scale: float = 0.05
     base_ang_vel_scale: float = 0.25
     command_scales: tuple[float, ...] = DEFAULT_LOCOMOTION_COMMAND_SCALES
     default_locomotion_cmd: tuple[float, float, float] = (0.0, 0.0, 0.0)
     action_clip: float = 100.0
+    base_body_name: str = "base_link"
+    root_init_pos: tuple[float, float, float] = (0.0, 0.0, 0.55)
+    root_init_quat: tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.0)
+    base_force_kd: float = 160.0
+    base_force_scale: float = 0.01
     joint_actuator_gains: dict[str, tuple[float, float]] = field(default_factory=_default_joint_actuator_gains)
 
     @property
@@ -145,6 +156,11 @@ class UniFPPolicyMetadata:
             "command_scales": list(self.command_scales),
             "default_locomotion_cmd": list(self.default_locomotion_cmd),
             "action_clip": self.action_clip,
+            "base_body_name": self.base_body_name,
+            "root_init_pos": list(self.root_init_pos),
+            "root_init_quat": list(self.root_init_quat),
+            "base_force_kd": self.base_force_kd,
+            "base_force_scale": self.base_force_scale,
             "joint_actuator_gains": {
                 joint_name: [kp, kv] for joint_name, (kp, kv) in self.joint_actuator_gains.items()
             },
@@ -184,6 +200,11 @@ class UniFPPolicyMetadata:
             command_scales=tuple(float(v) for v in raw.get("command_scales", base.command_scales)),
             default_locomotion_cmd=tuple(float(v) for v in raw.get("default_locomotion_cmd", base.default_locomotion_cmd)),
             action_clip=float(raw.get("action_clip", base.action_clip)),
+            base_body_name=str(raw.get("base_body_name", base.base_body_name)),
+            root_init_pos=tuple(float(v) for v in raw.get("root_init_pos", base.root_init_pos)),
+            root_init_quat=tuple(float(v) for v in raw.get("root_init_quat", base.root_init_quat)),
+            base_force_kd=float(raw.get("base_force_kd", base.base_force_kd)),
+            base_force_scale=float(raw.get("base_force_scale", base.base_force_scale)),
             joint_actuator_gains=joint_actuator_gains,
         )
 
@@ -203,53 +224,18 @@ def default_runtime_metadata() -> UniFPPolicyMetadata:
 
 
 def default_staged_eval_metadata() -> UniFPPolicyMetadata:
-    # MuJoCo PD gain compensation: PhysX implicit PD is stiffer than MuJoCo's
-    # semi-explicit position actuator. Scale kp×0.6, kv×0.7 to match the
-    # effective closed-loop response. Original IsaacLab gains in comments.
-    gains = {
-        "FL_hip_joint": (108.0, 2.8),     # IsaacLab: (180, 4.0)
-        "FR_hip_joint": (108.0, 2.8),
-        "RL_hip_joint": (108.0, 2.8),
-        "RR_hip_joint": (108.0, 2.8),
-        "FL_thigh_joint": (108.0, 2.8),
-        "FR_thigh_joint": (108.0, 2.8),
-        "RL_thigh_joint": (108.0, 2.8),
-        "RR_thigh_joint": (108.0, 2.8),
-        "FL_calf_joint": (180.0, 4.55),   # IsaacLab: (300, 6.5)
-        "FR_calf_joint": (180.0, 4.55),
-        "RL_calf_joint": (180.0, 4.55),
-        "RR_calf_joint": (180.0, 4.55),
-    }
-    return replace(
-        default_runtime_metadata(),
-        gait_frequency_hz=3.0,
-        default_locomotion_cmd=(0.0, 0.0, 0.0),
-        joint_actuator_gains=gains,
-    )
-
-
-def default_smart_gait_metadata() -> UniFPPolicyMetadata:
-    # Match UniFPAliengoReversePushEvalCfg actuator settings with the same
-    # MuJoCo compensation rule used by staged eval: kp×0.6, kv×0.7.
-    gains = {
-        "FL_hip_joint": (60.0, 2.45),     # IsaacLab smart gait: (100, 3.5)
-        "FR_hip_joint": (60.0, 2.45),
-        "RL_hip_joint": (60.0, 2.45),
-        "RR_hip_joint": (60.0, 2.45),
-        "FL_thigh_joint": (60.0, 2.45),
-        "FR_thigh_joint": (60.0, 2.45),
-        "RL_thigh_joint": (60.0, 2.45),
-        "RR_thigh_joint": (60.0, 2.45),
-        "FL_calf_joint": (96.0, 4.9),     # IsaacLab smart gait: (160, 7.0)
-        "FR_calf_joint": (96.0, 4.9),
-        "RL_calf_joint": (96.0, 4.9),
-        "RR_calf_joint": (96.0, 4.9),
-    }
     return replace(
         default_runtime_metadata(),
         gait_frequency_hz=2.0,
         default_locomotion_cmd=(0.0, 0.0, 0.0),
-        joint_actuator_gains=gains,
+    )
+
+
+def default_smart_gait_metadata() -> UniFPPolicyMetadata:
+    return replace(
+        default_runtime_metadata(),
+        gait_frequency_hz=2.0,
+        default_locomotion_cmd=(0.0, 0.0, 0.0),
     )
 
 
@@ -363,6 +349,7 @@ class PolicyRuntimeState:
 
 @dataclass(frozen=True)
 class ModelBindings:
+    joint_names: tuple[str, ...]
     joint_ids: tuple[int, ...]
     qpos_indices: np.ndarray
     qvel_indices: np.ndarray
@@ -377,6 +364,10 @@ def parse_triplet(values: Iterable[float]) -> np.ndarray:
     if len(values) != 3:
         raise ValueError(f"Expected exactly 3 values, received {len(values)}")
     return np.asarray(values, dtype=np.float32)
+
+
+def format_triplet(values: Iterable[float]) -> str:
+    return "(" + ", ".join(f"{float(v):.4g}" for v in values) + ")"
 
 
 def quat_conjugate(quat_wxyz: np.ndarray) -> np.ndarray:
@@ -694,6 +685,78 @@ def resolve_body_id(model: "mujoco.MjModel", body_name: str) -> int:
     return model.body(body_name).id
 
 
+def apply_contact_friction(
+    mujoco,
+    model: "mujoco.MjModel",
+    *,
+    ground_friction: Iterable[float] | None = None,
+    foot_friction: Iterable[float] | None = None,
+    foot_body_names: tuple[str, ...] = ("FL_calf", "FR_calf", "RL_calf", "RR_calf"),
+) -> dict[str, int]:
+    """Optionally override ground and A2 foot/calf collision friction in-place."""
+    counts = {"ground": 0, "foot": 0}
+    if ground_friction is not None:
+        friction = np.asarray(parse_triplet(ground_friction), dtype=np.float64)
+        for geom_id in range(model.ngeom):
+            geom_name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, geom_id) or ""
+            if geom_name == "ground_plane" or model.geom_type[geom_id] == mujoco.mjtGeom.mjGEOM_PLANE:
+                model.geom_friction[geom_id] = friction
+                counts["ground"] += 1
+
+    if foot_friction is not None:
+        friction = np.asarray(parse_triplet(foot_friction), dtype=np.float64)
+        foot_body_ids = {
+            mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, body_name)
+            for body_name in foot_body_names
+        }
+        foot_body_ids.discard(-1)
+        for geom_id in range(model.ngeom):
+            if int(model.geom_bodyid[geom_id]) not in foot_body_ids:
+                continue
+            if int(model.geom_contype[geom_id]) == 0 and int(model.geom_conaffinity[geom_id]) == 0:
+                continue
+            model.geom_friction[geom_id] = friction
+            counts["foot"] += 1
+    return counts
+
+
+def summarize_contact_friction(
+    mujoco,
+    model: "mujoco.MjModel",
+    *,
+    foot_body_names: tuple[str, ...] = ("FL_calf", "FR_calf", "RL_calf", "RR_calf"),
+) -> str:
+    ground_values: list[tuple[float, float, float]] = []
+    foot_values: list[tuple[float, float, float]] = []
+    foot_body_ids = {
+        mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, body_name)
+        for body_name in foot_body_names
+    }
+    foot_body_ids.discard(-1)
+    for geom_id in range(model.ngeom):
+        geom_name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, geom_id) or ""
+        friction = tuple(float(v) for v in model.geom_friction[geom_id])
+        if geom_name == "ground_plane" or model.geom_type[geom_id] == mujoco.mjtGeom.mjGEOM_PLANE:
+            ground_values.append(friction)
+        if int(model.geom_bodyid[geom_id]) in foot_body_ids and (
+            int(model.geom_contype[geom_id]) != 0 or int(model.geom_conaffinity[geom_id]) != 0
+        ):
+            foot_values.append(friction)
+
+    def summarize(values: list[tuple[float, float, float]]) -> str:
+        if not values:
+            return "none"
+        counts: dict[tuple[float, float, float], int] = {}
+        for value in values:
+            counts[value] = counts.get(value, 0) + 1
+        return ", ".join(
+            f"{format_triplet(value)} x{count}"
+            for value, count in sorted(counts.items(), key=lambda item: item[0])
+        )
+
+    return f"ground={summarize(ground_values)} foot={summarize(foot_values)}"
+
+
 def create_model_bindings(model: "mujoco.MjModel", metadata: UniFPPolicyMetadata) -> ModelBindings:
     joint_ids = resolve_joint_ids(model, metadata.joint_names)
     qpos_indices, qvel_indices = resolve_qpos_qvel_indices(model, joint_ids)
@@ -701,6 +764,7 @@ def create_model_bindings(model: "mujoco.MjModel", metadata: UniFPPolicyMetadata
     obs_qpos_indices, obs_qvel_indices = resolve_qpos_qvel_indices(model, obs_joint_ids)
     actuator_indices = resolve_joint_actuator_indices(model, joint_ids)
     return ModelBindings(
+        joint_names=metadata.joint_names,
         joint_ids=joint_ids,
         qpos_indices=qpos_indices,
         qvel_indices=qvel_indices,
@@ -721,11 +785,10 @@ def reset_model_state(
     mujoco.mj_resetData(model, data)
     if model.nkey > 0:
         mujoco.mj_resetDataKeyframe(model, data, 0)
-    else:
-        if model.nq >= 7:
-            data.qpos[0:3] = np.array([0.0, 0.0, 0.5], dtype=np.float64)
-            data.qpos[3:7] = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float64)
-        data.qpos[qpos_indices] = np.asarray(metadata.default_joint_pos, dtype=np.float64)
+    if model.nq >= 7:
+        data.qpos[0:3] = np.asarray(metadata.root_init_pos, dtype=np.float64)
+        data.qpos[3:7] = np.asarray(metadata.root_init_quat, dtype=np.float64)
+    data.qpos[qpos_indices] = np.asarray(metadata.default_joint_pos, dtype=np.float64)
     mujoco.mj_forward(model, data)
 
 
@@ -853,11 +916,32 @@ def build_target_joint_positions(
 
 
 def apply_control_targets(
+    model: "mujoco.MjModel",
     data: "mujoco.MjData",
     bindings: ModelBindings,
     target_joint_pos: np.ndarray,
+    metadata: UniFPPolicyMetadata,
 ) -> None:
-    data.ctrl[bindings.actuator_indices] = target_joint_pos
+    target_joint_pos = np.asarray(target_joint_pos, dtype=np.float64)
+    q = data.qpos[bindings.qpos_indices].astype(np.float64, copy=False)
+    qd = data.qvel[bindings.qvel_indices].astype(np.float64, copy=False)
+    tau = np.zeros(len(bindings.joint_names), dtype=np.float64)
+    for idx, joint_name in enumerate(bindings.joint_names):
+        gains = metadata.joint_actuator_gains.get(joint_name)
+        if gains is None:
+            raise RuntimeError(
+                f"Missing PD torque gains for controlled joint '{joint_name}'. "
+                "Set metadata.joint_actuator_gains for every controlled joint."
+            )
+        kp, kd = gains
+        tau[idx] = float(kp) * (target_joint_pos[idx] - q[idx]) - float(kd) * qd[idx]
+
+    ctrl_indices = bindings.actuator_indices
+    for local_idx, actuator_id in enumerate(ctrl_indices):
+        if bool(model.actuator_ctrllimited[actuator_id]):
+            lo, hi = model.actuator_ctrlrange[actuator_id]
+            tau[local_idx] = np.clip(tau[local_idx], lo, hi)
+    data.ctrl[ctrl_indices] = tau
 
 
 def set_body_force(
@@ -878,13 +962,16 @@ def apply_joint_actuator_gains(
     bindings: ModelBindings,
     metadata: UniFPPolicyMetadata,
 ) -> None:
-    if not metadata.joint_actuator_gains:
-        return
-    for joint_name, (kp, kv) in metadata.joint_actuator_gains.items():
+    for joint_name in bindings.joint_names:
+        if joint_name not in metadata.joint_actuator_gains:
+            raise RuntimeError(
+                f"Missing PD torque gains for controlled joint '{joint_name}'. "
+                "Set metadata.joint_actuator_gains for every controlled joint."
+            )
         try:
             joint_id = model.joint(joint_name).id
         except KeyError:
-            continue
+            raise RuntimeError(f"Cannot validate actuator gains because joint '{joint_name}' is missing.")
         matches = [
             actuator_id
             for actuator_id in range(model.nu)
@@ -892,12 +979,8 @@ def apply_joint_actuator_gains(
         ]
         if len(matches) != 1:
             raise RuntimeError(
-                f"Expected exactly one joint actuator for gain override on '{joint_name}', got {len(matches)}."
+                f"Expected exactly one joint actuator for PD torque control on '{joint_name}', got {len(matches)}."
             )
-        actuator_id = matches[0]
-        model.actuator_gainprm[actuator_id, 0] = kp
-        model.actuator_biasprm[actuator_id, 1] = -kp
-        model.actuator_biasprm[actuator_id, 2] = -kv
 
 
 def finite_or_nan(value: float) -> float:
@@ -992,7 +1075,7 @@ def draw_velocity_arrows(
     viewer,
     data: "mujoco.MjData",
     *,
-    trunk_body_id: int,
+    base_body_id: int,
     command_vel_xy: np.ndarray | None = None,
     external_force_w: np.ndarray | None = None,
     vel_scale: float = 0.5,
@@ -1000,7 +1083,7 @@ def draw_velocity_arrows(
     arrow_z_offset: float = 0.14,
     force_arrow_z_extra_offset: float = 0.0,
 ) -> None:
-    """Draw velocity, command, and force arrows attached to the robot trunk.
+    """Draw velocity, command, and force arrows attached to the robot base body.
 
     Call this **after** ``viewer.sync()``'s scene update, from a
     ``launch_passive`` loop, by using the viewer's internal scene object.
@@ -1009,20 +1092,20 @@ def draw_velocity_arrows(
         mujoco_mod: The ``mujoco`` module.
         viewer: A passive viewer instance (has ``.user_scn``).
         data: Current simulation data.
-        trunk_body_id: Body id of the robot trunk.
+        base_body_id: Body id of the robot root/base body.
         command_vel_xy: Desired base velocity (x, y) before Isaac scaling.
         external_force_w: World-frame external force 3-D vector.
         vel_scale: Visual length = actual_speed * vel_scale.
         force_scale: Visual length = force_magnitude * force_scale.
-        arrow_z_offset: Height above trunk CoM to anchor arrows.
+        arrow_z_offset: Height above base CoM to anchor arrows.
         force_arrow_z_extra_offset: Additional height applied only to the force arrow.
     """
     scene = viewer.user_scn
     # Reset user scene each frame
     scene.ngeom = 0
 
-    trunk_pos = data.xpos[trunk_body_id].copy()
-    origin = trunk_pos.copy()
+    base_pos = data.xpos[base_body_id].copy()
+    origin = base_pos.copy()
     origin[2] += arrow_z_offset
 
     # --- 1. Current velocity (blue) ---

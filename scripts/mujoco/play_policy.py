@@ -11,6 +11,7 @@ import numpy as np
 from model_loader import load_mujoco_model_from_path
 from runtime import (
     apply_control_targets,
+    apply_contact_friction,
     apply_joint_actuator_gains,
     build_command_vector,
     build_target_joint_positions,
@@ -25,6 +26,7 @@ from runtime import (
     parse_triplet,
     reset_model_state,
     resolve_body_id,
+    summarize_contact_friction,
     summarize_joint_actuator_gains,
     update_runtime_state_after_step,
     draw_velocity_arrows,
@@ -44,29 +46,6 @@ except ImportError:
 DEFAULT_STANDING_LIN_VEL_X_CLIP = 0.1
 DEFAULT_STANDING_LIN_VEL_Y_CLIP = 0.1
 DEFAULT_STANDING_ANG_VEL_YAW_CLIP = 0.2
-VIEWER_IMPORT_DELAY_S = 5.0
-VIEWER_DELAY_HIDDEN_BASE_POS = np.array([0.0, 0.0, -20.0], dtype=np.float64)
-
-IMPORT_INIT_HIP_POS = 0.0
-IMPORT_INIT_THIGH_POS = 1.45
-IMPORT_INIT_CALF_POS = -2.78
-IMPORT_INIT_LEG_QPOS = np.array(
-    [
-        IMPORT_INIT_HIP_POS,
-        IMPORT_INIT_HIP_POS,
-        IMPORT_INIT_HIP_POS,
-        IMPORT_INIT_HIP_POS,
-        IMPORT_INIT_THIGH_POS,
-        IMPORT_INIT_THIGH_POS,
-        IMPORT_INIT_THIGH_POS,
-        IMPORT_INIT_THIGH_POS,
-        IMPORT_INIT_CALF_POS,
-        IMPORT_INIT_CALF_POS,
-        IMPORT_INIT_CALF_POS,
-        IMPORT_INIT_CALF_POS,
-    ],
-    dtype=np.float64,
-)
 
 
 def clip_standing_command(
@@ -91,11 +70,11 @@ def standing_gait_vector() -> np.ndarray:
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Minimal MuJoCo sim2sim runner for the UniFP Aliengo policy.")
+    parser = argparse.ArgumentParser(description="Minimal MuJoCo sim2sim runner for the A2 UniFP policy.")
     parser.add_argument(
         "--model-path",
         type=Path,
-        default=Path("resources/aliengo/mujoco/aliengo.xml"),
+        default=Path("resources/a2_description/a2.xml"),
         help="Path to a MuJoCo-loadable URDF or MJCF model.",
     )
     parser.add_argument(
@@ -124,8 +103,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--leg-action-delay-steps",
         type=int,
         default=0,
-        choices=(0, 1),
-        help="Fixed leg action delay in control steps. Training used a random 0-1 range.",
+        choices=(0, 1, 2),
+        help="Fixed leg action delay in control steps. Training used a random 0-2 range.",
     )
     parser.add_argument(
         "--standing-lin-vel-x-clip",
@@ -147,6 +126,22 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--headless", action="store_true", help="Run without the MuJoCo viewer.")
     parser.add_argument("--real-time", action="store_true", help="Sleep to match wall-clock control rate.")
+    parser.add_argument(
+        "--ground-friction",
+        type=float,
+        nargs=3,
+        metavar=("SLIDE", "TORSION", "ROLL"),
+        default=None,
+        help="Override MuJoCo ground-plane friction. Defaults to the model/runtime value.",
+    )
+    parser.add_argument(
+        "--foot-friction",
+        type=float,
+        nargs=3,
+        metavar=("SLIDE", "TORSION", "ROLL"),
+        default=None,
+        help="Override A2 calf/foot collision friction. Useful because these geoms have higher contact priority.",
+    )
     return parser
 
 
@@ -176,6 +171,12 @@ def main() -> int:
     )
 
     model = load_mujoco_model_from_path(mujoco, args.model_path)
+    friction_override_counts = apply_contact_friction(
+        mujoco,
+        model,
+        ground_friction=args.ground_friction,
+        foot_friction=args.foot_friction,
+    )
     data = mujoco.MjData(model)
     if model.nu == 0:
         print(
@@ -186,14 +187,12 @@ def main() -> int:
         return 2
 
     bindings = create_model_bindings(model, metadata)
-    trunk_body_id = resolve_body_id(model, "trunk")
+    base_body_id = resolve_body_id(model, metadata.base_body_name)
     apply_joint_actuator_gains(model, bindings, metadata)
     policy = load_torchscript_policy(args.policy_path) if args.policy_path else None
 
     def initialize_robot_runtime_state():
         reset_model_state(mujoco, model, data, metadata, bindings.qpos_indices)
-        data.qpos[bindings.qpos_indices] = IMPORT_INIT_LEG_QPOS
-        mujoco.mj_forward(model, data)
         clear_body_forces(data)
         return initialize_runtime_state(
             data=data,
@@ -205,21 +204,17 @@ def main() -> int:
             gait_override=gait_override,
         )
 
-    def hide_robot_during_viewer_delay() -> None:
-        mujoco.mj_resetData(model, data)
-        if model.nq >= 7:
-            data.qpos[0:3] = VIEWER_DELAY_HIDDEN_BASE_POS
-            data.qpos[3:7] = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float64)
-        clear_body_forces(data)
-        mujoco.mj_forward(model, data)
-
     def print_runtime_config() -> None:
         print(
             "[INFO] Runtime config: "
             f"gait_frequency_hz={metadata.gait_frequency_hz:.3f} "
+            f"model_timestep={model.opt.timestep:.4f} "
+            f"control_dt={metadata.control_dt:.4f} "
             f"obs_delay_steps={args.obs_delay_steps} "
             f"leg_action_delay_steps={args.leg_action_delay_steps} "
             f"standing_command={standing_command} "
+            f"contact_friction={summarize_contact_friction(mujoco, model)} "
+            f"friction_overrides={friction_override_counts} "
             f"actuator_gains={summarize_joint_actuator_gains(metadata)}"
         )
 
@@ -228,7 +223,7 @@ def main() -> int:
         action, _ = infer_policy_outputs(policy, obs, action_dim=metadata.action_dim)
         action = np.clip(action, -metadata.action_clip, metadata.action_clip)
         target_joint_pos = build_target_joint_positions(action, runtime_state, metadata)
-        apply_control_targets(data, bindings, target_joint_pos)
+        apply_control_targets(model, data, bindings, target_joint_pos, metadata)
 
         wall_start = time.perf_counter()
         try:
@@ -261,23 +256,15 @@ def main() -> int:
         if mujoco_viewer is None:
             print("MuJoCo viewer is unavailable in this environment. Re-run with --headless.", file=sys.stderr)
             return 3
+        runtime_state = initialize_robot_runtime_state()
+        print_runtime_config()
         with mujoco_viewer.launch_passive(model, data) as viewer:
-            hide_robot_during_viewer_delay()
-            delay_start = time.perf_counter()
-            while viewer.is_running() and (time.perf_counter() - delay_start) < VIEWER_IMPORT_DELAY_S:
-                viewer.sync()
-                time.sleep(0.01)
-            if not viewer.is_running():
-                return 0
-
-            runtime_state = initialize_robot_runtime_state()
-            print_runtime_config()
-            configure_tracking_viewer_camera(mujoco, viewer, data, track_body_id=trunk_body_id)
+            configure_tracking_viewer_camera(mujoco, viewer, data, track_body_id=base_body_id)
             while viewer.is_running() and data.time < args.duration_s:
                 run_control_step(runtime_state)
                 draw_velocity_arrows(
                     mujoco, viewer, data,
-                    trunk_body_id=trunk_body_id,
+                    base_body_id=base_body_id,
                     command_vel_xy=locomotion_cmd[:2],
                 )
                 viewer.sync()

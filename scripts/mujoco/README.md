@@ -1,25 +1,28 @@
 # MuJoCo Sim2Sim Handoff
 
-This document is the handoff entry point for the MuJoCo-side sim2sim work for the UniFP Aliengo task.
+This document is the handoff entry point for the MuJoCo-side sim2sim work for the UniFP A2 task.
 
 Remote visualization and Xpra operations are documented in `scripts/mujoco/XPRA_OPERATIONS.md`.
 
 ## Latest Update
 
-The MuJoCo side now includes the staged-direction-force evaluation path needed to mirror
-`scripts/experiments/uniFP_aliengo/staged_direction_force_eval.py`.
+The current MuJoCo runtime is A2-only. Defaults target `resources/a2_description/a2.xml`,
+use `base_link` as the root body, and drive the A2 motor actuators with explicit PD torques
+from `policy.json` metadata.
+
+Older sections below include legacy AliengoZ1 implementation notes and are retained only as history.
 
 New entry points:
 
 - `scripts/mujoco/runtime.py`
   - shared policy/runtime helpers used by both playback and staged evaluation
-  - owns history stacking, delay buffers, quaternion math, actuator lookup, control-target assembly, metadata loading
+  - owns history stacking, delay buffers, quaternion math, actuator lookup, PD torque control, metadata loading
 - `scripts/mujoco/export_policy_wrapper.py`
   - exports the Isaac adaptation policy into a MuJoCo-ready TorchScript module
   - writes `policy.pt` and sibling `policy.json` metadata into the chosen output directory
   - validates exported `(action, pred_est)` against the original Isaac policy on real `obs["policy"]`
 - `scripts/mujoco/staged_direction_force_eval.py`
-  - MuJoCo reproduction of the 60-second staged-direction-force experiment
+  - A2 base-force-only staged-direction-force evaluation
   - reproduces the stage schedule, CSV schema, and terminal summary used by the Isaac-side experiment
 - `scripts/mujoco/play_policy.py`
   - now consumes the shared runtime module instead of carrying a separate copy of the observation/control logic
@@ -35,6 +38,7 @@ Expected MuJoCo staged-eval flow:
 
 ```bash
 conda run -n mujoco python scripts/mujoco/staged_direction_force_eval.py \
+  --model-path resources/a2_description/a2.xml \
   --policy-path <export-dir>/policy.pt \
   --headless --duration-s 1.0
 ```
@@ -53,16 +57,18 @@ Relevant Isaac-side references:
 - Isaac randomization/events are in `source/LMP/acc/tasks/manager_based/uniFP_aliengo/unifpaliengo_env_cfg.py:1114-1261`.
 - Isaac sim timing is in `source/LMP/acc/tasks/manager_based/uniFP_aliengo/unifpaliengo_env_cfg.py:1554-1562`.
 
-Current policy/runtime assumptions copied from Isaac:
+Current A2 policy/runtime defaults:
 
-- 17 policy-controlled joints
-- 73 observation dimensions per frame
+- 12 policy-controlled leg joints
+- 46 observation dimensions per frame
 - 32-frame history stack
 - 200 Hz physics, 50 Hz policy loop
 - optional observation delay `0-2`
-- optional leg-action delay `0-1`
+- optional leg-action delay `0-2`
+- `base_link` root body, root pose `(0, 0, 0.55)` / `(1, 0, 0, 0)`
+- A2 Isaac gains exported as hip/thigh `(140, 5)` and calf `(220, 9)`
 
-Those values are mirrored in `scripts/mujoco/play_policy.py:33-108`.
+Those values are mirrored in `scripts/mujoco/runtime.py` and the exported `policy.json`.
 
 ## What Was Done
 
@@ -298,19 +304,19 @@ python scripts/mujoco/play_policy.py --headless --duration-s 0.1
 After the contact / self-collision refinement, the following commands were also rerun successfully in the same environment:
 
 ```bash
-python scripts/mujoco/check_setup.py --model-path resources/aliengoZ1/mujoco/aliengoZ1.xml
-python scripts/mujoco/play_policy.py --model-path resources/aliengoZ1/mujoco/aliengoZ1.xml --headless --duration-s 0.1
+python scripts/mujoco/check_setup.py --model-path resources/a2_description/a2.xml
+python scripts/mujoco/play_policy.py --model-path resources/a2_description/a2.xml --headless --duration-s 0.1
 ```
 
 After the visual mesh layer was added, the following commands also succeeded:
 
 ```bash
 python scripts/mujoco/convert_visual_meshes.py --overwrite
-python scripts/mujoco/check_setup.py --model-path resources/aliengoZ1/mujoco/aliengoZ1.xml
-python scripts/mujoco/play_policy.py --model-path resources/aliengoZ1/mujoco/aliengoZ1.xml --headless --duration-s 0.1
+python scripts/mujoco/check_setup.py --model-path resources/a2_description/a2.xml
+python scripts/mujoco/play_policy.py --model-path resources/a2_description/a2.xml --headless --duration-s 0.1
 ```
 
-Observed result for the current MJCF:
+Observed result for the legacy AliengoZ1 MJCF:
 
 - `nq=25`
 - `nv=24`
