@@ -53,7 +53,7 @@ FORCE_COMMAND_START_STEPS = 8000 * 24  # 启用力命令的训练步数阈值
 BASE_EXT_FULL_RANGE = (-40.0, 40.0)  # base力的完整范围
 BASE_FORCE_KD = 100.0
 POLICY_OBS_DELAY_RANGE_STEPS = (0, 2)  # policy观测延迟范围（env steps）
-LEG_ACTION_DELAY_RANGE_STEPS = (0, 1)  # 腿部动作延迟范围（env steps）
+LEG_ACTION_DELAY_RANGE_STEPS = (0, 2)  # 腿部动作延迟范围（env steps）
 LEG_JOINT_NAMES = (
     "FL_hip_joint",
     "FR_hip_joint",
@@ -183,11 +183,11 @@ class CommandsCfg:
 @configclass
 class UniFPTerrainCfg(TerrainGeneratorCfg):
     """
-    - 实现"rough flat"粗糙平地
+    - 实现混合平地与"rough flat"粗糙平地
     
     - 地形类型为trimesh（三角网格）
-    - 100%使用rough flat地形
-    - 高度噪声范围[0.00, 0.1]米
+    - 40%使用真正平地，60%使用rough flat地形
+    - rough flat高度噪声范围[0.00, 0.03]米
     - 地形块大小8m x 8m
     - 10行20列网格布局
     """
@@ -206,9 +206,15 @@ class UniFPTerrainCfg(TerrainGeneratorCfg):
     
     # 子地形配置
     sub_terrains = {
+        "flat": hf_gen_cfg.HfRandomUniformTerrainCfg(
+            proportion=0.4,
+            noise_range=(0.0, 0.0),
+            noise_step=0.005,
+            border_width=0.0,
+        ),
         "rough_flat": hf_gen_cfg.HfRandomUniformTerrainCfg(
-            proportion=1.0,
-            noise_range=(0.00, 0.03),  # 高度噪声范围 (米)
+            proportion=0.6,
+            noise_range=(0.00, 0.05),  # 高度噪声范围 (米)
             noise_step=0.005,
             border_width=0.0,
         )
@@ -302,19 +308,19 @@ class UniFPSceneCfg(InteractiveSceneCfg):
             pos=[0.0, 0.0, 0.5],
             rot=[1.0, 0.0, 0.0, 0.0],
             joint_pos={
-                "FL_hip_joint": 0.1,  # [rad]
+                "FL_hip_joint": 0.0,  # [rad]
                 "FL_thigh_joint": 0.5,  # [rad]
                 "FL_calf_joint": -1.0,  # [rad]
 
-                "RL_hip_joint": 0.1,  # [rad]
+                "RL_hip_joint": 0.0,  # [rad]
                 "RL_thigh_joint": 0.5,  # [rad]
                 "RL_calf_joint": -1.0,  # [rad]
 
-                "FR_hip_joint": -0.1,  # [rad]
+                "FR_hip_joint": 0.0  ,  # [rad]
                 "FR_thigh_joint": 0.5,  # [rad]
                 "FR_calf_joint": -1.0,  # [rad]
 
-                "RR_hip_joint": -0.1,  # [rad]
+                "RR_hip_joint": 0.0,  # [rad]
                 "RR_thigh_joint": 0.5,  # [rad]
                 "RR_calf_joint": -1.0,  # [rad]
             },
@@ -330,9 +336,9 @@ class UniFPSceneCfg(InteractiveSceneCfg):
                 ],
                 effort_limit_sim=35.0,
                 velocity_limit_sim=20.0,
-                stiffness=80.0,
-                damping=2.5,
-                armature=0.0,
+                stiffness=60.0,
+                damping=2.0,
+                armature=0.03,
             ),
             "thighs": ImplicitActuatorCfg(
                 joint_names_expr=[
@@ -340,9 +346,9 @@ class UniFPSceneCfg(InteractiveSceneCfg):
                 ],
                 effort_limit_sim=35.0,
                 velocity_limit_sim=20.0,
-                stiffness=80.0,
-                damping=2.5,
-                armature=0.0,
+                stiffness=60.0,
+                damping=2.0,
+                armature=0.03,
             ),
             "calfs": ImplicitActuatorCfg(
                 joint_names_expr=[
@@ -352,9 +358,9 @@ class UniFPSceneCfg(InteractiveSceneCfg):
                 effort_limit_sim=45.0,
                 # Aliengo URDF: Hip/Thigh max 20 rad/s, Calf 15.9 rad/s
                 velocity_limit_sim=15.0,
-                stiffness=120.0,
-                damping=4.5,
-                armature=0.0,
+                stiffness=96.0,
+                damping=3.5,
+                armature=0.03,
             ),
         },
 
@@ -869,7 +875,7 @@ class EventCfg:
     # ========== 间隔触发事件 (interval mode) ==========
     
     # 7. 推动机器人 - 每8秒施加一次随机速度
-    push_robot = EventTerm(
+    """push_robot = EventTerm(
         func=mdp.push_by_setting_velocity_standInclude,
         mode="interval",
         interval_range_s=(8.0, 8.0),  # 每8秒触发一次
@@ -884,8 +890,8 @@ class EventCfg:
             "disable_after_step": FORCE_COMMAND_START_STEPS,
             "disable_after_step_resume": FORCE_COMMAND_RESUME_STEPS,
         },
-    )
-
+    )"""
+    push_robot = None
 
 @configclass
 class RewardsCfg:
