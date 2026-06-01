@@ -324,7 +324,7 @@ class UniFPSceneCfg(InteractiveSceneCfg):
                 effort_limit_sim=120.0,
                 velocity_limit_sim=22.0,
                 stiffness=140.0,
-                damping=5.0,
+                damping=4.5,
                 armature=0.03,
             ),
             "thighs": ImplicitActuatorCfg(
@@ -334,7 +334,7 @@ class UniFPSceneCfg(InteractiveSceneCfg):
                 effort_limit_sim=120.0,
                 velocity_limit_sim=22.0,
                 stiffness=140.0,
-                damping=5.0,
+                damping=4.5,
                 armature=0.03,
             ),
             "calfs": ImplicitActuatorCfg(
@@ -366,7 +366,6 @@ class UniFPSceneCfg(InteractiveSceneCfg):
         debug_vis=False,
         track_air_time=True,
         # 关键：必须启用contact processing才能获取接触力数据
-        track_pose=False,  # 不需要跟踪姿态（性能优化）
     )
     
     # 非法接触检测 penalize_contacts_on = ["thigh", "calf", "base_link"]
@@ -771,7 +770,7 @@ class EventCfg:
         func=mdp.reset_joints_by_offset,
         mode="reset",
         params={
-            "position_range": (0.0, 0.0),
+            "position_range": (-0.1, 0.1),
             "velocity_range": (0.0, 0.0),
             "asset_cfg": SceneEntityCfg("robot", joint_names=list(LEG_JOINT_NAMES), preserve_order=True),
         },
@@ -799,8 +798,8 @@ class EventCfg:
         mode="reset",
         params={
             "asset_cfg": SceneEntityCfg("robot", joint_names=list(LEG_JOINT_NAMES), preserve_order=True),
-            "stiffness_distribution_params": (0.9, 1.1),  # 缩放因子范围
-            "damping_distribution_params": (0.9, 1.1),
+            "stiffness_distribution_params": (0.8, 1.2),  # 缩放因子范围
+            "damping_distribution_params": (0.8, 1.2),
             "operation": "scale",  # 缩放操作
             "distribution": "uniform",  # 均匀分布
         },
