@@ -93,7 +93,7 @@ class CommandsCfg:
         """Configuration for base locomotion commands."""
 
         class_type = ExtendedUniformVelocityCommand
-        resampling_time_range: Tuple[float, float] = (5.0, 5.0)
+        resampling_time_range: Tuple[float, float] = (4.0, 8.0)
         heading_command: bool = False
         rel_standing_envs: float = 0.3
 
@@ -337,7 +337,7 @@ class UniFPSceneCfg(InteractiveSceneCfg):
                 effort_limit_sim=35.0,
                 velocity_limit_sim=20.0,
                 stiffness=60.0,
-                damping=2.0,
+                damping=2.5,
                 armature=0.03,
             ),
             "thighs": ImplicitActuatorCfg(
@@ -347,7 +347,7 @@ class UniFPSceneCfg(InteractiveSceneCfg):
                 effort_limit_sim=35.0,
                 velocity_limit_sim=20.0,
                 stiffness=60.0,
-                damping=2.0,
+                damping=2.5,
                 armature=0.03,
             ),
             "calfs": ImplicitActuatorCfg(
@@ -359,7 +359,7 @@ class UniFPSceneCfg(InteractiveSceneCfg):
                 # Aliengo URDF: Hip/Thigh max 20 rad/s, Calf 15.9 rad/s
                 velocity_limit_sim=15.0,
                 stiffness=96.0,
-                damping=3.5,
+                damping=4.5,
                 armature=0.03,
             ),
         },
@@ -837,8 +837,8 @@ class EventCfg:
                 "FL_thigh_joint", "FR_thigh_joint", "RL_thigh_joint", "RR_thigh_joint",
                 "FL_calf_joint", "FR_calf_joint", "RL_calf_joint", "RR_calf_joint",
             ]),
-            "stiffness_distribution_params": (0.9, 1.1),  # 缩放因子范围
-            "damping_distribution_params": (0.9, 1.1),
+            "stiffness_distribution_params": (0.7, 1.3),  # 缩放因子范围
+            "damping_distribution_params": (0.7, 1.3),
             "operation": "scale",  # 缩放操作
             "distribution": "uniform",  # 均匀分布
         },
