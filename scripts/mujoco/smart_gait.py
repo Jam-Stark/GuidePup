@@ -64,6 +64,7 @@ BRAKE_GATE_FORCE_X_THRESHOLD_N = -32.0
 BRAKE_GATE_MIN_CMD_VX = 0.2
 BRAKE_GATE_MAX_CMD_WZ = 0.10
 BRAKE_GATE_HOLD_STEPS = 2
+ULTRA_HIGH_CONTACT_FRICTION = (8.0, 0.10, 0.10)
 
 FORCE_SCHEDULE_NONE = "none"
 FORCE_SCHEDULE_DEMO = "demo"
@@ -1571,6 +1572,77 @@ def resolve_output_csv(path_str: str | None) -> Path:
     return output_path
 
 
+def _geom_name(mujoco_mod, model, geom_id: int) -> str:
+    return mujoco_mod.mj_id2name(model, mujoco_mod.mjtObj.mjOBJ_GEOM, geom_id) or f"geom[{geom_id}]"
+
+
+def _set_geom_friction(
+    mujoco_mod,
+    model,
+    friction_values,
+    *,
+    label: str,
+    predicate,
+) -> tuple[str, int, tuple[float, float, float]] | None:
+    if friction_values is None:
+        return None
+
+    friction = parse_triplet(friction_values).astype(np.float64)
+    if np.any(friction < 0.0):
+        raise ValueError(f"{label} friction values must be non-negative, got {tuple(friction)}.")
+
+    match_count = 0
+    for geom_id in range(model.ngeom):
+        name = _geom_name(mujoco_mod, model, geom_id)
+        if predicate(geom_id, name):
+            model.geom_friction[geom_id, :] = friction
+            match_count += 1
+
+    if match_count == 0:
+        raise ValueError(f"No MuJoCo geoms matched the {label} friction override.")
+    return label, match_count, tuple(float(value) for value in friction)
+
+
+def apply_contact_friction_overrides(mujoco_mod, model, args: argparse.Namespace) -> list[tuple[str, int, tuple[float, float, float]]]:
+    ground_friction = args.ground_friction
+    foot_friction = args.foot_friction
+    robot_body_friction = args.robot_body_friction
+
+    if args.high_friction_experiment:
+        if ground_friction is None:
+            ground_friction = ULTRA_HIGH_CONTACT_FRICTION
+        if foot_friction is None:
+            foot_friction = ULTRA_HIGH_CONTACT_FRICTION
+
+    summaries = []
+    for summary in (
+        _set_geom_friction(
+            mujoco_mod,
+            model,
+            ground_friction,
+            label="ground",
+            predicate=lambda geom_id, name: bool(model.geom_contype[geom_id] & 0x1) or "ground" in name,
+        ),
+        _set_geom_friction(
+            mujoco_mod,
+            model,
+            foot_friction,
+            label="foot",
+            predicate=lambda geom_id, name: bool(model.geom_contype[geom_id] & 0x2) or name.endswith("_foot_geom"),
+        ),
+        _set_geom_friction(
+            mujoco_mod,
+            model,
+            robot_body_friction,
+            label="robot_body",
+            predicate=lambda geom_id, name: bool(model.geom_contype[geom_id] & 0x4),
+        ),
+    ):
+        if summary is not None:
+            summaries.append(summary)
+    return summaries
+
+
 def extract_force_estimator_outputs(
     pred_est: np.ndarray,
     base_force_tgt_local: np.ndarray,
@@ -1767,6 +1839,39 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional override for the flattened policy history length used by the MuJoCo runtime.",
     )
+    parser.add_argument(
+        "--high-friction-experiment",
+        action="store_true",
+        help=(
+            "Run with ultra-high ground and foot contact friction. Equivalent to "
+            f"--ground-friction {' '.join(str(v) for v in ULTRA_HIGH_CONTACT_FRICTION)} "
+            f"--foot-friction {' '.join(str(v) for v in ULTRA_HIGH_CONTACT_FRICTION)} unless explicitly overridden."
+        ),
+    )
+    parser.add_argument(
+        "--ground-friction",
+        type=float,
+        nargs=3,
+        metavar=("SLIDE", "TORSION", "ROLL"),
+        default=None,
+        help="Override MuJoCo friction triplet for ground contact geoms.",
+    )
+    parser.add_argument(
+        "--foot-friction",
+        type=float,
+        nargs=3,
+        metavar=("SLIDE", "TORSION", "ROLL"),
+        default=None,
+        help="Override MuJoCo friction triplet for foot contact geoms.",
+    )
+    parser.add_argument(
+        "--robot-body-friction",
+        type=float,
+        nargs=3,
+        metavar=("SLIDE", "TORSION", "ROLL"),
+        default=None,
+        help="Override MuJoCo friction triplet for non-foot robot contact geoms.",
+    )
     parser.add_argument("--cmd-vx", type=float, default=0.0, help="Fixed body-frame x velocity command.")
     parser.add_argument("--cmd-vy", type=float, default=0.0, help="Fixed body-frame y velocity command.")
     parser.add_argument("--cmd-wz", type=float, default=0.0, help="Fixed yaw-rate command.")
@@ -1901,6 +2006,10 @@ def main() -> int:
     )
 
     model = load_mujoco_model_from_path(mujoco, args.model_path)
+    try:
+        friction_summaries = apply_contact_friction_overrides(mujoco, model, args)
+    except ValueError as exc:
+        parser.error(str(exc))
     data = mujoco.MjData(model)
     if model.nu == 0:
         print("The MuJoCo model has no actuators; smart-gait evaluation cannot run.", file=sys.stderr)
@@ -1955,6 +2064,12 @@ def main() -> int:
         f"leg_action_delay_steps={args.leg_action_delay_steps} "
         f"actuator_gains={summarize_joint_actuator_gains(metadata)}"
     )
+    for label, match_count, friction in friction_summaries:
+        print(
+            "[INFO] Contact friction override: "
+            f"{label} geoms={match_count} "
+            f"friction=({friction[0]:.3f}, {friction[1]:.3f}, {friction[2]:.3f})"
+        )
     print(f"[INFO] CSV output: {output_csv}")
 
     csv_header = [
