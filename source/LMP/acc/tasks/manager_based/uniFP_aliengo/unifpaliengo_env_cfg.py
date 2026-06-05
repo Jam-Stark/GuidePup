@@ -798,8 +798,8 @@ class EventCfg:
         mode="reset",
         params={
             "asset_cfg": SceneEntityCfg("robot", joint_names=list(LEG_JOINT_NAMES), preserve_order=True),
-            "stiffness_distribution_params": (0.8, 1.2),  # 缩放因子范围
-            "damping_distribution_params": (0.8, 1.2),
+            "stiffness_distribution_params": (0.7, 1.3),  # 缩放因子范围
+            "damping_distribution_params": (0.7, 1.3),
             "operation": "scale",  # 缩放操作
             "distribution": "uniform",  # 均匀分布
         },

@@ -297,6 +297,9 @@ def feet_air_time(
 ) -> torch.Tensor:
     """
     Reward function for feet air time during locomotion.
+
+    IsaacLab official semantics: on first contact, use ``last_air_time`` because
+    ``current_air_time`` is reset to 0 when contact is detected.
     
     只在 walking 状态下计算奖励，standing 状态下奖励为 0。
     
@@ -322,7 +325,7 @@ def feet_air_time(
     # 计算腾空时间奖励
     foot_body_ids = ordered_contact_sensor_body_ids(env, SceneEntityCfg("contact_feet_forces"))
     first_contact_filter = contact_sensor.compute_first_contact(dt)[:, foot_body_ids]
-    air_time = contact_sensor.data.current_air_time[:, foot_body_ids]
+    air_time = contact_sensor.data.last_air_time[:, foot_body_ids]
     air_time_reward = torch.sum((air_time - float(target_air_time)) * first_contact_filter.float(), dim=1)
     
     # 只在 walking 状态下给奖励

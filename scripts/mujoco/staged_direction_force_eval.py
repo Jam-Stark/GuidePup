@@ -5,6 +5,7 @@ import argparse
 import csv
 from dataclasses import dataclass
 from datetime import datetime
+import json
 import math
 import sys
 import time
@@ -30,7 +31,6 @@ from runtime import (
     initialize_runtime_state,
     load_policy_metadata,
     load_torchscript_policy,
-    parse_triplet,
     reset_model_state,
     resolve_body_id,
     set_body_force,
@@ -52,6 +52,11 @@ except ImportError:
 
 EPISODE_LENGTH_S = 60.0
 
+FORCE_PROFILE_LEGACY_STAGED = "legacy_staged"
+FORCE_PROFILE_SMOOTH_0_20 = "smooth_0_20"
+FORCE_INTERP_LINEAR = "linear"
+FORCE_INTERP_SMOOTHSTEP = "smoothstep"
+
 DIR_NONE = "none"
 DIR_FORWARD = "forward"
 DIR_LEFT = "left"
@@ -70,6 +75,7 @@ class StageSegment:
     force_start_n: float = 0.0
     force_end_n: float = 0.0
     capture_axis: bool = False
+    force_interp: str = FORCE_INTERP_LINEAR
 
     @property
     def is_active(self) -> bool:
@@ -82,6 +88,8 @@ class StageSegment:
             return float(self.force_end_n)
         ratio = (float(time_s) - self.start_s) / (self.end_s - self.start_s)
         ratio = max(0.0, min(ratio, 1.0))
+        if self.force_interp == FORCE_INTERP_SMOOTHSTEP:
+            ratio = smoothstep01(ratio)
         return float(self.force_start_n + ratio * (self.force_end_n - self.force_start_n))
 
 
@@ -102,6 +110,93 @@ STAGE_SEGMENTS = (
 )
 
 
+def smoothstep01(value: float) -> float:
+    clamped = max(0.0, min(float(value), 1.0))
+    return clamped * clamped * (3.0 - 2.0 * clamped)
+
+
+def build_smooth_0_20_segments(
+    *,
+    peak_force_n: float,
+    ramp_s: float,
+    hold_s: float,
+    release_s: float,
+    idle_s: float,
+) -> tuple[StageSegment, ...]:
+    peak = max(float(peak_force_n), 0.0)
+    ramp = max(float(ramp_s), 0.0)
+    hold = max(float(hold_s), 0.0)
+    release = max(float(release_s), 0.0)
+    idle = max(float(idle_s), 0.0)
+
+    segments: list[StageSegment] = []
+    cursor_s = 0.0
+    for direction_name in ACTIVE_DIRECTIONS:
+        if idle > 0.0:
+            segments.append(StageSegment(f"{direction_name}_idle_pre", DIR_NONE, "idle", cursor_s, cursor_s + idle))
+            cursor_s += idle
+        segments.append(
+            StageSegment(
+                f"{direction_name}_ramp_smooth",
+                direction_name,
+                "ramp",
+                cursor_s,
+                cursor_s + ramp,
+                0.0,
+                peak,
+                capture_axis=True,
+                force_interp=FORCE_INTERP_SMOOTHSTEP,
+            )
+        )
+        cursor_s += ramp
+        segments.append(
+            StageSegment(
+                f"{direction_name}_hold",
+                direction_name,
+                "hold",
+                cursor_s,
+                cursor_s + hold,
+                peak,
+                peak,
+            )
+        )
+        cursor_s += hold
+        segments.append(
+            StageSegment(
+                f"{direction_name}_release_smooth",
+                direction_name,
+                "release",
+                cursor_s,
+                cursor_s + release,
+                peak,
+                0.0,
+                force_interp=FORCE_INTERP_SMOOTHSTEP,
+            )
+        )
+        cursor_s += release
+        if idle > 0.0:
+            segments.append(StageSegment(f"{direction_name}_idle_post", DIR_NONE, "idle", cursor_s, cursor_s + idle))
+            cursor_s += idle
+
+    if not segments:
+        return (StageSegment("idle_0", DIR_NONE, "idle", 0.0, EPISODE_LENGTH_S),)
+    return tuple(segments)
+
+
+def build_force_profile_segments(args: argparse.Namespace) -> tuple[StageSegment, ...]:
+    if args.force_profile == FORCE_PROFILE_LEGACY_STAGED:
+        return STAGE_SEGMENTS
+    if args.force_profile == FORCE_PROFILE_SMOOTH_0_20:
+        return build_smooth_0_20_segments(
+            peak_force_n=args.peak_force_n,
+            ramp_s=args.ramp_s,
+            hold_s=args.hold_s,
+            release_s=args.release_s,
+            idle_s=args.idle_s,
+        )
+    raise ValueError(f"Unsupported force profile: {args.force_profile}")
+
+
 def direction_axis_from_forward(forward_axis_xy: np.ndarray, direction_name: str) -> np.ndarray:
     if direction_name == DIR_FORWARD:
         return forward_axis_xy.astype(np.float32)
@@ -113,26 +208,36 @@ def direction_axis_from_forward(forward_axis_xy: np.ndarray, direction_name: str
 
 
 class StagedDirectionForceScheduler:
-    def __init__(self):
+    def __init__(self, segments: tuple[StageSegment, ...]):
+        if not segments:
+            raise ValueError("StagedDirectionForceScheduler requires at least one segment.")
+        self.segments = segments
         self.current_segment_name: str | None = None
+        self.current_axis_direction_name: str | None = None
         self.current_axis_xy = np.full(2, np.nan, dtype=np.float32)
         self.current_block_start_root_xy = np.full(2, np.nan, dtype=np.float32)
 
     def segment_for_time(self, time_s: float) -> StageSegment:
-        if time_s >= STAGE_SEGMENTS[-1].start_s:
-            return STAGE_SEGMENTS[-1]
-        for segment in STAGE_SEGMENTS:
+        if time_s >= self.segments[-1].start_s:
+            return self.segments[-1]
+        for segment in self.segments:
             if segment.start_s <= time_s < segment.end_s:
                 return segment
-        return STAGE_SEGMENTS[-1]
+        return self.segments[-1]
 
     def update(self, base_quat_wxyz: np.ndarray, root_pos_xy: np.ndarray, time_s: float) -> dict[str, object]:
         segment = self.segment_for_time(time_s)
         segment_changed = segment.segment_name != self.current_segment_name
 
-        if segment_changed and segment.capture_axis:
+        should_capture_axis = segment_changed and (
+            segment.capture_axis
+            or (segment.is_active and segment.direction_name != self.current_axis_direction_name)
+            or (segment.is_active and not np.all(np.isfinite(self.current_axis_xy)))
+        )
+        if should_capture_axis:
             forward_axis_xy = base_forward_axis_xy(base_quat_wxyz)
             self.current_axis_xy = direction_axis_from_forward(forward_axis_xy, segment.direction_name)
+            self.current_axis_direction_name = segment.direction_name
             self.current_block_start_root_xy = root_pos_xy.astype(np.float32, copy=True)
 
         force_target_n = segment.force_target_at(time_s)
@@ -173,6 +278,10 @@ def resolve_output_csv(path_str: str | None) -> Path:
     return output_path
 
 
+def resolve_summary_json(output_csv: Path) -> Path:
+    return output_csv.with_suffix(output_csv.suffix + ".summary.json")
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Evaluate the A2 UniFP policy in MuJoCo under the staged-direction-force schedule."
@@ -185,7 +294,27 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--policy-path", type=Path, required=True, help="Path to the MuJoCo-ready TorchScript policy.")
     parser.add_argument("--output-csv", type=str, default=None, help="Optional CSV output path.")
-    parser.add_argument("--duration-s", type=float, default=EPISODE_LENGTH_S, help="Evaluation horizon in seconds.")
+    parser.add_argument(
+        "--duration-s",
+        type=float,
+        default=None,
+        help="Evaluation horizon in seconds. Defaults to the full selected force profile.",
+    )
+    parser.add_argument("--cmd-vx", type=float, default=0.0, help="Fixed body-frame x velocity command.")
+    parser.add_argument("--cmd-vy", type=float, default=0.0, help="Fixed body-frame y velocity command.")
+    parser.add_argument("--cmd-wz", type=float, default=0.0, help="Fixed yaw-rate command.")
+    parser.add_argument(
+        "--force-profile",
+        type=str,
+        default=FORCE_PROFILE_LEGACY_STAGED,
+        choices=(FORCE_PROFILE_LEGACY_STAGED, FORCE_PROFILE_SMOOTH_0_20),
+        help="Force schedule profile. The default preserves the previous staged 10-40N benchmark.",
+    )
+    parser.add_argument("--peak-force-n", type=float, default=20.0, help="Peak force for smooth_0_20.")
+    parser.add_argument("--ramp-s", type=float, default=4.0, help="Smooth ramp duration per direction.")
+    parser.add_argument("--hold-s", type=float, default=4.0, help="Peak hold duration per direction.")
+    parser.add_argument("--release-s", type=float, default=3.0, help="Smooth release duration per direction.")
+    parser.add_argument("--idle-s", type=float, default=2.0, help="Idle duration before and after each direction.")
     parser.add_argument(
         "--obs-delay-steps",
         type=int,
@@ -301,6 +430,121 @@ def extract_force_estimator_outputs(
     }
 
 
+def json_safe_float(value: float | np.floating | None) -> float | None:
+    if value is None:
+        return None
+    value_f = float(value)
+    return value_f if math.isfinite(value_f) else None
+
+
+def empty_direction_metrics(sample_count_total: int = 0) -> dict[str, object]:
+    return {
+        "sample_count_total": int(sample_count_total),
+        "sample_count_active": 0,
+        "active_mean_l2": None,
+        "rmse_l2": None,
+        "peak_l2": None,
+        "per_axis_mae": {"x": None, "y": None, "z": None},
+        "primary_axis_mae": None,
+        "lag_seconds": None,
+        "correlation": None,
+    }
+
+
+def best_lag_correlation(
+    target_primary: np.ndarray,
+    estimate_primary: np.ndarray,
+    *,
+    step_dt: float,
+    max_lag_s: float = 1.0,
+) -> tuple[float | None, float | None]:
+    target = np.asarray(target_primary, dtype=np.float64)
+    estimate = np.asarray(estimate_primary, dtype=np.float64)
+    finite_mask = np.isfinite(target) & np.isfinite(estimate)
+    target = target[finite_mask]
+    estimate = estimate[finite_mask]
+    if target.size < 3 or estimate.size < 3:
+        return None, None
+
+    max_lag_steps = max(int(round(max_lag_s / max(float(step_dt), 1.0e-9))), 0)
+    best_lag_steps: int | None = None
+    best_corr: float | None = None
+    for lag_steps in range(-max_lag_steps, max_lag_steps + 1):
+        if lag_steps > 0:
+            target_slice = target[:-lag_steps]
+            estimate_slice = estimate[lag_steps:]
+        elif lag_steps < 0:
+            target_slice = target[-lag_steps:]
+            estimate_slice = estimate[:lag_steps]
+        else:
+            target_slice = target
+            estimate_slice = estimate
+
+        if target_slice.size < 3:
+            continue
+        target_std = float(np.std(target_slice))
+        estimate_std = float(np.std(estimate_slice))
+        if target_std <= 1.0e-9 or estimate_std <= 1.0e-9:
+            continue
+        corr = float(np.corrcoef(target_slice, estimate_slice)[0, 1])
+        if not math.isfinite(corr):
+            continue
+        if best_corr is None or corr > best_corr:
+            best_corr = corr
+            best_lag_steps = lag_steps
+
+    if best_corr is None or best_lag_steps is None:
+        return None, None
+    return float(best_lag_steps) * float(step_dt), best_corr
+
+
+def compute_direction_metrics(samples: list[dict[str, object]], *, step_dt: float) -> dict[str, object]:
+    if not samples:
+        return empty_direction_metrics()
+
+    est = np.asarray([sample["base_force_est_local"] for sample in samples], dtype=np.float64)
+    tgt = np.asarray([sample["base_force_tgt_local"] for sample in samples], dtype=np.float64)
+    err_l2 = np.asarray([sample["base_force_err_l2"] for sample in samples], dtype=np.float64)
+    target_norm = np.linalg.norm(tgt, axis=1)
+    active_mask = np.isfinite(target_norm) & (target_norm > 1.0)
+    if not np.any(active_mask):
+        return empty_direction_metrics(sample_count_total=len(samples))
+
+    est_active = est[active_mask]
+    tgt_active = tgt[active_mask]
+    err_l2_active = err_l2[active_mask]
+    err_active = est_active - tgt_active
+    axis_mae = np.mean(np.abs(err_active), axis=0)
+
+    target_norm_active = np.linalg.norm(tgt_active, axis=1)
+    unit_target = tgt_active / np.maximum(target_norm_active[:, None], 1.0e-9)
+    target_primary = np.sum(tgt_active * unit_target, axis=1)
+    estimate_primary = np.sum(est_active * unit_target, axis=1)
+    primary_axis_mae = float(np.mean(np.abs(estimate_primary - target_primary)))
+    lag_seconds, correlation = best_lag_correlation(
+        target_primary,
+        estimate_primary,
+        step_dt=step_dt,
+        max_lag_s=1.0,
+    )
+
+    return {
+        "sample_count_total": int(len(samples)),
+        "sample_count_active": int(np.count_nonzero(active_mask)),
+        "active_mean_l2": json_safe_float(np.mean(err_l2_active)),
+        "rmse_l2": json_safe_float(math.sqrt(float(np.mean(np.square(err_l2_active))))),
+        "peak_l2": json_safe_float(np.max(err_l2_active)),
+        "per_axis_mae": {
+            "x": json_safe_float(axis_mae[0]),
+            "y": json_safe_float(axis_mae[1]),
+            "z": json_safe_float(axis_mae[2]),
+        },
+        "primary_axis_mae": json_safe_float(primary_axis_mae),
+        "lag_seconds": json_safe_float(lag_seconds),
+        "correlation": json_safe_float(correlation),
+    }
+
+
 def main() -> int:
     parser = build_arg_parser()
     args = parser.parse_args()
@@ -310,9 +554,14 @@ def main() -> int:
         return 1
 
     output_csv = resolve_output_csv(args.output_csv)
+    summary_json = resolve_summary_json(output_csv)
+    force_segments = build_force_profile_segments(args)
+    profile_duration_s = float(force_segments[-1].end_s)
+    duration_s = float(args.duration_s) if args.duration_s is not None else profile_duration_s
+    duration_s = max(duration_s, 0.0)
     metadata = load_policy_metadata(args.policy_path, fallback=default_staged_eval_metadata())
     metadata = default_staged_eval_metadata() if metadata is None else metadata
-    locomotion_cmd = parse_triplet(metadata.default_locomotion_cmd)
+    locomotion_cmd = np.array([float(args.cmd_vx), float(args.cmd_vy), float(args.cmd_wz)], dtype=np.float32)
     initial_command_obs = build_command_vector(
         locomotion_cmd=locomotion_cmd,
         metadata=metadata,
@@ -350,12 +599,19 @@ def main() -> int:
         f"base_body_name={metadata.base_body_name} "
         f"actuator_gains={summarize_joint_actuator_gains(metadata)}"
     )
+    print(
+        "[INFO] Force benchmark: "
+        f"force_profile={args.force_profile} "
+        f"command=({locomotion_cmd[0]:.3f}, {locomotion_cmd[1]:.3f}, {locomotion_cmd[2]:.3f}) "
+        f"profile_duration_s={profile_duration_s:.3f} "
+        f"duration_s={duration_s:.3f}"
+    )
     print(f"[INFO] CSV output: {output_csv}")
+    print(f"[INFO] Summary JSON output: {summary_json}")
 
     step_dt = float(metadata.control_dt)
-    duration_s = float(args.duration_s)
     max_steps = max(int(round(duration_s / step_dt)), 1)
-    scheduler = StagedDirectionForceScheduler()
+    scheduler = StagedDirectionForceScheduler(force_segments)
 
     block_last_proj_disp = np.full(len(ACTIVE_DIRECTIONS), np.nan, dtype=np.float64)
     block_last_cross_disp = np.full(len(ACTIVE_DIRECTIONS), np.nan, dtype=np.float64)
@@ -369,6 +625,7 @@ def main() -> int:
     ended_early = False
     end_step = max_steps
     last_logged_payload: dict[str, object] | None = None
+    direction_metric_samples: dict[str, list[dict[str, object]]] = {name: [] for name in ACTIVE_DIRECTIONS}
 
     csv_header = [
         "env_id",
@@ -451,13 +708,29 @@ def main() -> int:
             world_to_base_yaw(np.asarray(scheduler_outputs["force_w"], dtype=np.float32), base_quat),
             base_force_scale=metadata.base_force_scale,
         )
+        direction_name = str(scheduler_outputs["direction_name"])
+        if direction_name in direction_metric_samples:
+            direction_metric_samples[direction_name].append(
+                {
+                    "time_s": time_s,
+                    "base_force_est_local": np.asarray(
+                        estimator_outputs["base_force_est_local"],
+                        dtype=np.float32,
+                    ).copy(),
+                    "base_force_tgt_local": np.asarray(
+                        estimator_outputs["base_force_tgt_local"],
+                        dtype=np.float32,
+                    ).copy(),
+                    "base_force_err_l2": float(estimator_outputs["base_force_err_l2"]),
+                }
+            )
 
         write_csv_row(
             writer,
             step=step,
             time_s=time_s,
             segment_name=str(scheduler_outputs["segment_name"]),
-            direction_name=str(scheduler_outputs["direction_name"]),
+            direction_name=direction_name,
             phase_name=str(scheduler_outputs["phase_name"]),
             cmd_vel_b=locomotion_cmd,
             force_target_n=float(scheduler_outputs["force_target_n"]),
@@ -643,6 +916,44 @@ def main() -> int:
         f"gripper_force_err_active_mean={format_optional(gripper_force_err_active_mean)} "
         f"gripper_force_err_peak={format_optional(gripper_force_err_peak)}"
     )
+    per_direction_metrics = {
+        direction_name: compute_direction_metrics(direction_metric_samples[direction_name], step_dt=step_dt)
+        for direction_name in ACTIVE_DIRECTIONS
+    }
+    summary_payload = {
+        "policy_path": str(Path(args.policy_path).expanduser().resolve()),
+        "model_path": str(Path(args.model_path).expanduser().resolve()),
+        "output_csv": str(output_csv),
+        "summary_json": str(summary_json),
+        "command": {
+            "cmd_vx": float(locomotion_cmd[0]),
+            "cmd_vy": float(locomotion_cmd[1]),
+            "cmd_wz": float(locomotion_cmd[2]),
+        },
+        "force_profile": args.force_profile,
+        "force_profile_duration_s": json_safe_float(profile_duration_s),
+        "peak_force_n": json_safe_float(args.peak_force_n),
+        "ramp_s": json_safe_float(args.ramp_s),
+        "hold_s": json_safe_float(args.hold_s),
+        "release_s": json_safe_float(args.release_s),
+        "idle_s": json_safe_float(args.idle_s),
+        "model_timestep": json_safe_float(model.opt.timestep),
+        "control_dt": json_safe_float(metadata.control_dt),
+        "obs_delay_steps": int(args.obs_delay_steps),
+        "leg_action_delay_steps": int(args.leg_action_delay_steps),
+        "duration_s": json_safe_float(duration_s),
+        "max_steps": int(max_steps),
+        "end_step": int(end_step),
+        "ended_early": bool(ended_early),
+        "active_force_sample_count": int(active_force_sample_count),
+        "base_force_err_active_mean": json_safe_float(base_force_err_active_mean),
+        "base_force_err_peak": json_safe_float(base_force_err_peak),
+        "per_direction_metrics": per_direction_metrics,
+    }
+    with summary_json.open("w") as summary_file:
+        json.dump(summary_payload, summary_file, indent=2, sort_keys=True, allow_nan=False)
+        summary_file.write("\n")
+    print(f"[INFO] Summary JSON written to: {summary_json}")
     return 0
 
 

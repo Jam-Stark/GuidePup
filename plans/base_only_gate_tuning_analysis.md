@@ -16,12 +16,13 @@ Using gate preset **v1** (tuned for the prior arm-inclusive policy) with the new
 The root cause is a **sustained force-estimator drift** unique to the base-only
 policy that the v1 temporal filters are too permissive to reject.
 
-Two new presets are proposed:
+Two base-only presets were proposed; an additional A2 proportional tuning preset is now available:
 
 | Preset | Description |
 |--------|-------------|
 | `v2` | Moderate hardening — rejects the observed false positive with ~0.5 s additional entry latency |
 | `v2_robust` | Aggressive hardening — wider noise margin, longer hold; ~1.0 s additional entry latency |
+| `a2_prop_20n` | A2 proportional 20N force-estimator tuning preset |
 
 ---
 
@@ -390,6 +391,31 @@ GATE_PRESET_V2_ROBUST: {
 }
 ```
 
+**`a2_prop_20n`** — A2 proportional 20N force-estimator tuning:
+
+```python
+GATE_PRESET_A2_PROP_20N: {
+    "evidence_cap_n": 14.0,
+    "baseline_tau_s": 1.4,
+    "baseline_margin_n": 0.60,
+    "baseline_update_max_n": 1.50,
+    "enter_threshold_n": 7.00,
+    "exit_threshold_n": 1.00,
+    "enter_tau_on_s": 0.18,
+    "enter_tau_off_s": 0.35,
+    "exit_tau_on_s": 0.10,
+    "exit_tau_off_s": 0.16,
+    "enter_score_threshold": 0.78,
+    "exit_score_threshold": 0.70,
+    "dir_consistency_min_force_n": 2.00,
+    "dir_consistency_tau_s": 0.28,
+    "dir_consistency_threshold": 0.50,
+    "switch_cooldown_s": 1.00,
+    "enter_hold_s": 0.20,
+    "exit_hold_s": 0.12,
+}
+```
+
 ### 10.5 Testing Commands
 
 ```bash
@@ -418,5 +444,20 @@ bash scripts/mujoco/run_in_xpra.sh python scripts/mujoco/smart_gait.py \
   --log-interval 30 \
   --output-csv logs/experiments/unifp_smart_gait_mujoco/base_only_v2_robust.csv \
   --gate-preset v2_robust
+
+# a2_prop_20n
+bash scripts/mujoco/run_in_xpra.sh python scripts/mujoco/smart_gait.py \
+  --policy-path logs/rsl_rl/uniFP_aliengo_position_force/2026-05-23_14-25-38_A2_base_only_v2/mujoco_exported/policy.pt \
+  --model-path resources/a2_description/a2.xml \
+  --policy-history-length 32 \
+  --walking-gait-frequency 2.0 \
+  --force-schedule human_guide \
+  --human-guide-base-force-n 20.0 \
+  --obs-delay-steps 2 \
+  --leg-action-delay-steps 1 \
+  --real-time \
+  --log-interval 30 \
+  --output-csv logs/experiments/unifp_smart_gait_mujoco/base_only_a2_prop_20n.csv \
+  --gate-preset a2_prop_20n
 ```
 ```

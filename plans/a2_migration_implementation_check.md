@@ -17,6 +17,7 @@
 
 - v1, recorded `2026-05-22 19:49:13 HKT`: A2 初始迁移基线。该版本完成 A2 asset/body/joint/foot 顺序迁移，并保留基础训练设置：`BASE_EXT_FULL_RANGE=(-65.0, 65.0)`、`BASE_FORCE_KD=160.0`、A2 actuator limits、PD v1 `hip/thigh=140.0/5.0`、`calf=220.0/9.0`、terrain `noise_range=(0.00, 0.03)`、leg action delay `(0, 1)`、feet height target `0.08`、feet high threshold `0.15`。
 - v2, recorded `2026-05-22 19:49:13 HKT`: 在 v1 上增加当前增强项：`armature=0.03`、terrain `noise_range=(0.00, 0.05)`、leg action delay `(0, 2)`、feet height target `0.13`、feet high threshold `0.22`。其余未列参数继承 v1。
+- v3, recorded `2026-06-03 16:33 HKT`: `feet_air_time` implementation 改为在 `first_contact` step 使用 `last_air_time`，符合 IsaacLab official semantics；`current_air_time` 在 contact 时会 reset to 0。
 
 ## Implemented Correctly
 
@@ -49,6 +50,7 @@
 
 - reward 中 joint torque、stand still、joint acc、joint vel、joint pos limit、torque limit、hip deviation 等顺序敏感 `SceneEntityCfg` 已用 `LEG_JOINT_NAMES` 或显式 hip list，并设置 `preserve_order=True`。
 - feet contact、feet air time、feet drag、feet height、feet pos xy 等足端相关 reward 已改为 ordered foot/body/contact helper。
+- `feet_air_time` base `target_air_time=0.25` 对 `2 Hz` half-cycle 仍有效；实现已按 IsaacLab official semantics 在 `first_contact` 使用 `last_air_time`，避免 contact step 的 `current_air_time=0` 把 landing reward 错算为负值。
 - `feet_height` active 配置已改为 `all_feet=True`。
 - `feet_contact_forces` 的 `max_contact_force` 已改为 `240.0`。
 - `base_height` reward target 已改为 `0.50`。
@@ -90,8 +92,8 @@
 
 ### Eval Config Is Not The Same Gait Baseline
 
-- `unifpaliengo_eval_cfg.py` 仍把 reverse-push eval 的 gait frequency 覆盖为 `3.0`，并把 `target_air_time` 改为 `0.1667`。
-- 如果该 eval 是专项反推测试，这可以作为例外；如果要用它验证 A2 迁移基线，应改回 `2.0 / 0.25` 或另建 A2 baseline eval。
+- `unifpaliengo_eval_cfg.py` 当前是 `gait_frequency=2.0`，但仍把 `target_air_time` 覆盖为 `0.1667`。
+- 这属于后续 config consistency TODO：如果该 eval 要验证 A2 训练基线，应统一回 `2 Hz / 0.25` 或另建 A2 baseline eval；本轮 `feet_air_time` bugfix 不改 `unifpaliengo_eval_cfg.py`。
 
 ### Base Force Full Range Is Curriculum-Gated
 
@@ -193,7 +195,7 @@
    - torque utilization 是否大量贴近 1.0
    - contact force penalty 是否常态爆高
    - base height termination 是否过早触发
-3. 决定 reverse-push eval 是否应该跟训练基线保持 `2 Hz / 0.25`，还是保留 `3 Hz / 0.1667` 作为专项测试。
+3. 决定 reverse-push eval 是否应该跟训练基线保持 `2 Hz / 0.25`，还是保留当前 `2 Hz / 0.1667` 作为专项测试。
 4. 若 A2 初训站立/慢走不稳，优先调 PD、ref_dof scale/calf factor、feet height/contact force、base force curriculum，而不是再改 observation/action contract。
 
 ## Static Verification Already Completed

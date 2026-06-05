@@ -149,6 +149,7 @@ GATE_PRESET_V1_TURNING = "v1_turning"
 GATE_PRESET_V1_ROBUST_TURNING = "v1_robust_turning"
 GATE_PRESET_V2 = "v2"
 GATE_PRESET_V2_ROBUST = "v2_robust"
+GATE_PRESET_A2_PROP_20N = "a2_prop_20n"
 
 GATE_PRESET_OVERRIDES = {
     GATE_PRESET_LEGACY: {},
@@ -309,6 +310,26 @@ GATE_PRESET_OVERRIDES = {
         "switch_cooldown_s": 1.20,
         "enter_hold_s": 0.20,
         "exit_hold_s": 0.04,
+    },
+    GATE_PRESET_A2_PROP_20N: {
+        "evidence_cap_n": 14.0,
+        "baseline_tau_s": 1.4,
+        "baseline_margin_n": 0.60,
+        "baseline_update_max_n": 1.50,
+        "enter_threshold_n": 7.00,
+        "exit_threshold_n": 1.00,
+        "enter_tau_on_s": 0.18,
+        "enter_tau_off_s": 0.35,
+        "exit_tau_on_s": 0.10,
+        "exit_tau_off_s": 0.16,
+        "enter_score_threshold": 0.78,
+        "exit_score_threshold": 0.70,
+        "dir_consistency_min_force_n": 2.00,
+        "dir_consistency_tau_s": 0.28,
+        "dir_consistency_threshold": 0.50,
+        "switch_cooldown_s": 1.00,
+        "enter_hold_s": 0.20,
+        "exit_hold_s": 0.12,
     },
 }
 
@@ -1812,6 +1833,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
             GATE_PRESET_V1_ROBUST_TURNING,
             GATE_PRESET_V2,
             GATE_PRESET_V2_ROBUST,
+            GATE_PRESET_A2_PROP_20N,
         ),
         help="Optional standing/walking gate preset. Presets override the individual gate tuning flags.",
     )
