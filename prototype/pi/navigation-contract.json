@@ -1,0 +1,16 @@
+{
+  "version": "navigation-v2",
+  "source": "explicit_prototype_convention",
+  "description": "For an unspecified approach-to-door goal, wait outside the observed target plane. User-specified numeric distances remain separate and take precedence.",
+  "waiting_zone": {
+    "distance_definition": "minimum signed horizontal distance from the configured robot footprint to the observed target plane, on its approach side",
+    "front_clearance_m": [0.6, 0.9],
+    "heading_tolerance_deg": 25,
+    "lateral_tolerance_m": 0.65
+  },
+  "doorway_exit_margin_m": 0.35,
+  "local_goal": { "position_tolerance_m": 0.08, "heading_tolerance_deg": 8 },
+  "doorway_exit_margin_note": "Requested clearance beyond the observed entrance plane; not a measurement of an unseen jamb's thickness. Offline evaluation separately checks the actual far edge.",
+  "target_plane_max_rms_m": 0.04,
+  "target_plane_max_vertical_tilt_deg": 20
+}

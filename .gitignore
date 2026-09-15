@@ -83,3 +83,12 @@ tests/
 .isaac-lab-docker-history
 
 skills/
+
+# Prototype dependencies, models and local configuration
+/.local
+**/node_modules/
+**/.env
+
+.ai/runtime/
+.ai/outgoing-artifacts/
+.omo/run-continuation/

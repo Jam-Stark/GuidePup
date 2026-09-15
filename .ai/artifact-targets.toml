@@ -1,0 +1,8 @@
+version = 1
+
+[targets.pro_space]
+provider = "google_drive"
+folder_id = "1JWQrkkOrItsKlFUjfxsadUrOcXChGpOf"
+folder_name = "Pro_Space"
+visibility = "public-write"
+standing_authorization = "create-only-stage-artifacts"

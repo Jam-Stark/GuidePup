@@ -1,0 +1,64 @@
+version = 5
+output_dir = ".ai/outgoing-artifacts"
+
+[activation]
+mode = "explicit"
+require_confirm_stage_handoff = true
+
+[selection]
+include = [
+  "logs/**",
+  "io_descriptors/**",
+  "outputs/**",
+  "artifacts/**",
+  "renders/**",
+  "videos/**",
+  "**/resolved_config*.yaml",
+  "**/resolved_config*.yml",
+  "**/metrics*.json",
+  "**/summary*.json",
+  "**/receipt*.json",
+  "**/ledger*.md",
+]
+exclude = [
+  "**/.env*",
+  "**/*token*",
+  "**/*secret*",
+  "**/*credential*",
+  "**/cache/**",
+  "**/__pycache__/**",
+]
+checkpoint_patterns = ["**/*.pt", "**/*.pth", "**/*.ckpt", "**/*.onnx", "**/*.safetensors"]
+include_checkpoints_default = false
+max_file_bytes = 2147483648
+max_bundle_bytes = 10737418240
+
+[packaging]
+# This is the final compressed size of each generated ZIP, not raw input size.
+# Keep 5 MiB below the observed 100 MB connector boundary.
+max_single_zip_bytes = 99614720
+strategy = "single-or-semantic-standard-zips"
+index_filename = "worker_delivery__BUNDLE_INDEX.md"
+split_volume_archives = false
+
+[naming]
+worker_prefix = "worker_delivery__"
+# The Pro package is a conversation attachment transferred by Owner, not a Drive upload.
+pro_full_review_zip = "pro_delivery__full_review.zip"
+
+[upload]
+# Upload applies only to Worker stage artifacts.
+backend = "capability-router"
+standing_authorization = "create-only-stage-artifacts"
+root_folder_id = "1JWQrkkOrItsKlFUjfxsadUrOcXChGpOf"
+remote = "gdrive"
+rclone_remote = "gdrive"
+
+[pro_review]
+require_git_publish = true
+git_remote = "origin"
+prompt_filename = "PRO_REVIEW_PROMPT.md"
+full_review_filename = "FULL_REVIEW.md"
+worker_parse_prompt_filename = "LOCAL_WORKER_PARSE_PROMPT.md"
+delivery_mode = "owner-chat-transfer"
+local_review_root = "docs/pro-reviews"

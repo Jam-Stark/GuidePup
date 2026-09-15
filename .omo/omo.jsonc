@@ -1,0 +1,8 @@
+{
+  "team_mode": {
+    "enabled": false,
+    "max_parallel_members": 4,
+    "max_members": 8,
+    "tmux_visualization": false
+  }
+}

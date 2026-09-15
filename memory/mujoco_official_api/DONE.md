@@ -1,0 +1,5 @@
+# DONE
+
+- 2026-06-03 22:52 HKT：使用 context7 解析 MuJoCo official docs，选定 library id `/google-deepmind/mujoco`，并读取 XML option/solver/contact/friction、default/class、actuator/control range、simulation stepping/control 相关最小证据。
+- 2026-06-03 22:52 HKT：创建最小 file-based memory system 路由：根目录 `MEMORY.md`、`memory/MEMORY.md`、`memory/mujoco_official_api/description.md`、`TODO.md`、`DONE.md`。
+- 2026-06-03 23:10 HKT：使用 context7 与 MuJoCo official docs 完成 `option timestep` / `mj_step` / Python `nstep` / direct `mjData.ctrl` timing 核查。官方证据来自 `/google-deepmind/mujoco`、`XMLreference.rst`、`programming/simulation.rst`、`APIreference/APIfunctions.html`、`python.rst`。结论：XML `<option timestep>` 默认 `0.002` seconds；C `mj_step` 推进一个 `mjModel.opt.timestep`；Python `mujoco.mj_step(model, data, nstep=N)` 等价于连续调用 underlying `mj_step` N 次；direct control 应在 `mj_step` 前写入 `mjData.ctrl`。项目证据：A2 XML 未设置 timestep，`conda run -n mujoco` 加载得到 `model.opt.timestep=0.0020`，且 `mj_step(..., nstep=4)` 后 `data.time` 增加 `0.0080`；metadata `sim_dt=0.005`、`control_decimation=4`、`control_dt=0.020`，所以当前 `play_policy.py` 实际 action hold 是 `0.008s`，支持 alan 的 timing mismatch 结论。

@@ -1,0 +1,4 @@
+# The official HF backend is sufficient for the first single-GPU prototype.
+torch==2.10.0
+torchvision==0.25.0
+transformers==5.8.0

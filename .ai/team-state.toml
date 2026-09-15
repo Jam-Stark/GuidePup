@@ -1,0 +1,37 @@
+version = 2
+state_dir = ".ai/runtime/team"
+database = ".ai/runtime/team/team-state.sqlite3"
+snapshot = ".ai/runtime/team/team-snapshot.json"
+marker = ".ai/runtime/team/coordination.json"
+events = ".ai/runtime/team/hook-events.jsonl"
+default_mode = "inactive"
+
+[authority]
+main_path = "/root"
+main_only = ["scope", "acceptance", "revision", "write_lease", "resource_lease", "git", "external_write", "hard_stop"]
+
+[activation]
+allowed_modes = ["adaptive", "strict"]
+strict_role_groups = ["writer", "reviewer", "runtime_qa"]
+
+[messaging]
+allowed_types = ["PEER_FINDING", "PEER_REQUEST", "AUTHORITY_REQUEST"]
+material_types = ["AUTHORITY_REQUEST"]
+
+[roles.researcher]
+required = ["outcome"]
+
+[roles.planner]
+required = ["outcome"]
+
+[roles.writer]
+required = ["outcome", "revision", "write_set", "acceptance"]
+
+[roles.reviewer]
+required = ["outcome", "revision", "read_set", "acceptance"]
+
+[roles.runtime_qa]
+required = ["outcome", "revision", "acceptance"]
+
+[roles.memory_curator]
+required = ["outcome", "read_set"]

@@ -1,0 +1,74 @@
+<mujoco model="prototype_elevator_lobby">
+  <!-- Native static test scene, not a converted Open-RMF Hotel World. -->
+  <asset>
+    <texture name="lobby_tiles" type="2d" builtin="checker" width="512" height="512"
+             rgb1=".69 .66 .59" rgb2=".74 .71 .64"/>
+    <material name="lobby_floor" texture="lobby_tiles" texrepeat="1 1" texuniform="true"
+              specular=".15" shininess=".1"/>
+    <material name="lobby_wall" rgba=".88 .87 .82 1"/>
+    <material name="lift_steel" rgba=".49 .54 .57 1" specular=".6" shininess=".45"/>
+    <material name="lift_frame" rgba=".24 .28 .31 1" specular=".5" shininess=".5"/>
+    <material name="wood" rgba=".38 .21 .10 1" specular=".1"/>
+    <material name="dark_panel" rgba=".025 .035 .04 1"/>
+    <material name="indicator_green" rgba=".2 1 .35 1" emission=".8"/>
+  </asset>
+  <default/>
+  <worldbody>
+    <geom name="floor" type="plane" size="15 15 .1" material="lobby_floor" friction="1 .005 .0001"/>
+    <body name="lobby_shell">
+      <geom name="lobby_west_wall" type="box" pos="-.1 0 1.5" size=".1 4.2 1.5" material="lobby_wall"/>
+      <geom name="lobby_east_wall" type="box" pos="10.1 0 1.5" size=".1 4.2 1.5" material="lobby_wall"/>
+      <geom name="lobby_north_wall" type="box" pos="5 4.1 1.5" size="5 .1 1.5" material="lobby_wall"/>
+      <geom name="lobby_south_wall" type="box" pos="5 -4.1 1.5" size="5 .1 1.5" material="lobby_wall"/>
+      <geom name="lobby_ceiling" type="box" pos="5 0 3.1" size="5 4 .1" rgba=".92 .92 .89 1"/>
+      <geom name="east_baseboard" type="box" pos="9.97 0 .065" size=".03 4 .065" rgba=".3 .3 .28 1"/>
+      <geom name="north_baseboard" type="box" pos="5 3.97 .065" size="5 .03 .065" rgba=".3 .3 .28 1"/>
+      <geom name="south_baseboard" type="box" pos="5 -3.97 .065" size="5 .03 .065" rgba=".3 .3 .28 1"/>
+    </body>
+    <!-- The door face is x=9.87, centred at y=1.6; geometry labels are offline only. -->
+    <body name="elevator_doors" pos="9.9 1.6 0">
+      <geom name="elevator_left_leaf" type="box" pos="0 .427 1.15" size=".03 .423 1.15" material="lift_steel"/>
+      <geom name="elevator_right_leaf" type="box" pos="0 -.427 1.15" size=".03 .423 1.15" material="lift_steel"/>
+    </body>
+    <body name="elevator_surround" pos="9.85 1.6 0">
+      <geom name="elevator_left_jamb" type="box" pos="0 .91 1.2" size=".09 .06 1.2" material="lift_frame"/>
+      <geom name="elevator_right_jamb" type="box" pos="0 -.91 1.2" size=".09 .06 1.2" material="lift_frame"/>
+      <geom name="elevator_header" type="box" pos="0 0 2.36" size=".09 .97 .06" material="lift_frame"/>
+      <geom name="elevator_sill" type="box" pos="0 0 .008" size=".14 .85 .008" material="lift_frame"/>
+      <geom name="elevator_center_seam" type="box" pos=".045 0 1.15" size=".008 .004 1.15" material="dark_panel"/>
+      <geom name="floor_display" type="box" pos=".085 0 2.58" size=".035 .29 .105" material="dark_panel"/>
+      <geom name="floor_digit_top" type="box" pos=".044 -.08 2.619" size=".004 .009 .034" material="indicator_green" contype="0" conaffinity="0"/>
+      <geom name="floor_digit_bottom" type="box" pos=".044 -.08 2.545" size=".004 .009 .034" material="indicator_green" contype="0" conaffinity="0"/>
+      <geom name="display_arrow_stem" type="capsule" fromto=".044 .12 2.52 .044 .12 2.64" size=".009" material="indicator_green" contype="0" conaffinity="0"/>
+      <geom name="display_arrow_left" type="capsule" fromto=".044 .12 2.64 .044 .16 2.595" size=".009" material="indicator_green" contype="0" conaffinity="0"/>
+      <geom name="display_arrow_right" type="capsule" fromto=".044 .12 2.64 .044 .08 2.595" size=".009" material="indicator_green" contype="0" conaffinity="0"/>
+      <geom name="call_panel" type="box" pos=".095 -1.19 1.1" size=".035 .07 .16" material="lift_frame"/>
+      <geom name="call_up_button" type="cylinder" pos=".051 -1.19 1.16" quat=".7071068 0 .7071068 0" size=".027 .008" rgba=".7 .76 .79 1"/>
+      <geom name="call_down_button" type="cylinder" pos=".051 -1.19 1.04" quat=".7071068 0 .7071068 0" size=".027 .008" rgba=".7 .76 .79 1"/>
+    </body>
+    <body name="ordinary_room_door" pos="9.92 -2.55 0">
+      <geom name="room_door_leaf" type="box" pos="0 0 1.1" size=".035 .5 1.1" material="wood"/>
+      <geom name="room_door_upper_panel" type="box" pos="-.038 0 1.61" size=".005 .38 .38" rgba=".44 .26 .13 1"/>
+      <geom name="room_door_lower_panel" type="box" pos="-.038 0 .58" size=".005 .38 .38" rgba=".44 .26 .13 1"/>
+      <geom name="room_door_left_trim" type="box" pos="0 .55 1.13" size=".065 .05 1.13" rgba=".2 .12 .07 1"/>
+      <geom name="room_door_right_trim" type="box" pos="0 -.55 1.13" size=".065 .05 1.13" rgba=".2 .12 .07 1"/>
+      <geom name="room_door_top_trim" type="box" pos="0 0 2.23" size=".065 .6 .03" rgba=".2 .12 .07 1"/>
+      <geom name="room_door_handle" type="capsule" fromto="-.10 -.36 1.03 -.10 -.20 1.03" size=".017" rgba=".75 .7 .5 1"/>
+      <geom name="room_door_number_plate" type="box" pos="-.044 0 1.9" size=".009 .09 .045" rgba=".7 .64 .42 1"/>
+    </body>
+    <body name="lobby_bench" pos="5.8 -3.48 0">
+      <geom name="bench_seat" type="box" pos="0 0 .45" size="1.05 .35 .09" rgba=".23 .27 .3 1"/>
+      <geom name="bench_back" type="box" pos="0 -.27 .75" size="1.05 .08 .25" rgba=".23 .27 .3 1"/>
+      <geom name="bench_leg_a" type="box" pos="-.82 0 .20" size=".045 .23 .2" material="lift_frame"/>
+      <geom name="bench_leg_b" type="box" pos=".82 0 .20" size=".045 .23 .2" material="lift_frame"/>
+    </body>
+    <body name="lobby_planter" pos="8.8 3.4 0">
+      <geom name="planter_pot" type="cylinder" pos="0 0 .23" size=".25 .23" rgba=".53 .47 .39 1"/>
+      <geom name="plant_stem" type="cylinder" pos="0 0 .73" size=".035 .4" rgba=".25 .19 .10 1"/>
+      <geom name="plant_leaves_top" type="ellipsoid" pos="0 0 1.24" size=".3 .3 .4" rgba=".18 .37 .13 1"/>
+      <geom name="plant_leaves_side" type="ellipsoid" pos="0 .1 .92" size=".37 .25 .3" rgba=".23 .42 .15 1"/>
+    </body>
+    <light name="lobby_light_near" pos="3 0 2.95" dir=".4 0 -1" diffuse=".5 .5 .48" ambient=".3 .3 .3" directional="true" castshadow="false"/>
+    <light name="lobby_light_far" pos="8 1 2.95" dir="-.4 0 -1" diffuse=".5 .5 .48" ambient=".3 .3 .3" directional="true" castshadow="false"/>
+  </worldbody>
+</mujoco>

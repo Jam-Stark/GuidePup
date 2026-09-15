@@ -1,0 +1,19 @@
+{
+  "centers_base_m": [[-0.3, 0.0], [0.0, 0.0], [0.3, 0.0]],
+  "radii_m": [0.3, 0.3, 0.3],
+  "desired_clearance_m": 0.03,
+  "minimum_swept_clearance_m": 0.003,
+  "clearance_cost_weight": 10000.0,
+  "velocity_response_time_s": 0.15,
+  "yaw_response_time_s": 0.15,
+  "obstacle_cell_side_m": 0.04,
+  "basis": {
+    "robot_xml": ".local/assets/a2-old/a2.xml",
+    "pose_source": ".local/outputs/sim_20260914_164607/contacts.jsonl",
+    "geometry_method": "A2-only forward kinematics of 259 recorded poses, no simulation stepping; collision primitives projected into the horizontal base-yaw frame.",
+    "sampled_x_bounds_m": [-0.48700813, 0.3943224],
+    "sampled_y_bounds_m": [-0.26077006, 0.26500351],
+    "sampled_required_radius_m": 0.2939133255,
+    "limitation": "Covers the measured walking poses, not all joint-limit configurations. Controller clearance is additional to these radii."
+  }
+}

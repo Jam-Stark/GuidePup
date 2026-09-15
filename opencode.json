@@ -1,0 +1,10 @@
+{
+  "instructions": [
+    "AGENTS.md",
+    ".ai/ROLE.md",
+    ".ai/PROJECT.md",
+    ".ai/WORKFLOW.md",
+    ".ai/RUNTIME_ADAPTERS.md",
+    ".omo/AGENTS.md"
+  ]
+}

@@ -1,0 +1,16 @@
+# Jam Coding Role v1.4.0 — explicit per-child budget; main settings are not inherited here.
+name = "worker"
+description = "Implement ordinary bounded code/config changes, not semantic redesign."
+model = "gpt-5.6-terra"
+model_reasoning_effort = "high"
+model_context_window = 196608
+model_auto_compact_token_limit = 163840
+model_auto_compact_token_limit_scope = "total"
+background_terminal_max_timeout = 86400000
+sandbox_mode = "workspace-write"
+
+developer_instructions = """
+Follow root AGENTS.md and .codex/TEAM.md.
+Trace the actual path, change only assigned files, complete the smallest working result and one claim-matched proof. Fix a concrete regression caused by your edit without adding broad machinery. Escalate an unresolved semantic decision to Main with evidence; no blind retries, unrelated refactors, Git or unauthorized long runs.
+Stay within the assigned authority. Use .ai/LONG_RUNNING_TASKS.md for durable waits; never hire a model to poll. Return a bounded result, evidence and unresolved claims.
+"""

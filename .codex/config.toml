@@ -1,0 +1,18 @@
+# v1.4.0: Main model and effort intentionally absent; respect App selection.
+model_context_window = 516000
+model_auto_compact_token_limit = 464400
+model_auto_compact_token_limit_scope = "total"
+# Maximum empty write_stdin wait, NOT a process-kill timeout or default sleep.
+background_terminal_max_timeout = 86400000
+
+[features]
+context_management = { experimental_mode = true }
+token_budget.enabled = true
+token_budget.use_history_notes_extension = true
+
+[agents]
+enabled = true
+max_concurrent_threads_per_session = 5
+default_subagent_model = "gpt-6-astra"
+default_subagent_reasoning_effort = "low"
+interrupt_message = true
