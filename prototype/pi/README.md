@@ -1,10 +1,12 @@
 # Pi resident navigation monitor
 
+New machine setup, including the Qwen endpoint and ZenMux Gemini credentials/profiles: [SETUP.md](SETUP.md).
+
 The runtime uses one resident event loop, one model proposal at a time, one preceding movement-decision buffer, and SQLite/JSONL task archives. Python owns LightNav/MPC/old A2 motion and the human force brake. Current framework changes and evidence: [NAVIGATION_FRAMEWORK.md](../NAVIGATION_FRAMEWORK.md). Design: [MONITOR_DESIGN.md](MONITOR_DESIGN.md).
 
 ## Run
 
-From `/home/baoquanc/workspace/ForceControl-lightnav`:
+From the repository root:
 
 ```bash
 bash prototype/run.sh build

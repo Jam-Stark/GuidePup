@@ -70,10 +70,11 @@ LightNav 来自 `LightOriginsHQ/LightNav-0`，主权重文件为 `model-00001-of
 YOLOE 主模型原文件 79,417,413 字节，`mobileclip2_b.ts` 原文件 253,794,476 字节。
 完整公开文件尺寸/配置见附件中的模型清单；这不是内容一致性证明。若公开模型已有更新，记录差异再解释结果，不能声称严格复现原权重。
 
+新机器须重新配置 Pi 和两个远程模型，完整配置、环境变量优先级及实际连接确认步骤见 [pi/SETUP.md](pi/SETUP.md)。
 Qwen 使用 `http://vic.precognition.team:8888/v1`，模型 ID 必须保留末尾斜杠：`Qwen3.6-35B-A3B-FP8/`。
 不要在新机器下载本地 Qwen。Gemini 使用 `prototype/pi/zenmux.sh gemini`，配置为
 `google/gemini-3.8-flash`、`reasoning_effort=low`、输出上限 4096；Qwen thinking off、上限 2048。
-Gemini 需要新机器已有的 `ZENMUX_API_KEY`，或私下配置 `.local/secrets/zenmux.env`。
+Gemini 需要在新机器重新设置 `ZENMUX_API_KEY`，或私下配置 `.local/secrets/zenmux.env`。
 该凭证未提交 Git、未上传 Drive。缺失时先完成 Qwen 和环境准备，再请 Owner 在新机器安全配置；不要把密钥写入日志或迁移文件。
 
 ## 继续未能运行的测试
