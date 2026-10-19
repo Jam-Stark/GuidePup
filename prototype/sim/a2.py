@@ -10,15 +10,21 @@ from pathlib import Path
 import mujoco
 import numpy as np
 import torch
-from depth import DepthFrame
+from depth import DepthFrame, DepthImage
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'scripts/mujoco'))
 sys.path.insert(0, str(ROOT / '.local/vendor/LightNav-0/mujoco_demo'))
+sys.path.insert(0, str(ROOT / 'prototype'))
 import runtime as old
+from robot import MuJoCoSensorReader, RGBDLocalOdometry, SensorPacket, SensorPolicyRuntime
 
 
 class A2Simulation:
+    @property
+    def stamp_s(self):
+        return float(self.data.time)
+
     def __init__(self, scene: str, camera: str, render: bool = True,
                  spawn_pose: tuple[float, float, float] | None = None):
         torch.set_num_threads(1)
@@ -79,20 +85,29 @@ class A2Simulation:
         self.data = mujoco.MjData(self.model)
         self.bindings = old.create_model_bindings(self.model, self.metadata)
         self.base_id = self.model.body('base_link').id
-        self.camera_id = self.model.camera('nav_rgb').id
         self.contact_log = None
+        self.sensor_log = None
         self.robot_geom = self.model.body_rootid[self.model.geom_bodyid] == self.base_id
         self.data.qpos[:3] = self.spawn
         self.data.qpos[3:7] = (math.cos(spawn_yaw / 2), 0., 0., math.sin(spawn_yaw / 2))
         self.data.qpos[self.bindings.qpos_indices] = self.metadata.default_joint_pos
         mujoco.mj_forward(self.model, self.data)
-        self.runtime = old.initialize_runtime_state(
-            self.data, self.bindings, self.metadata, obs_delay_steps=0,
-            leg_action_delay_steps=0, command_obs=np.zeros(3, dtype=np.float32),
-            gait_override=np.array([0., 1.], dtype=np.float32))
+        self.sensor_reader = MuJoCoSensorReader(self.model, self.metadata)
         self.gains = np.asarray([self.metadata.joint_actuator_gains[n] for n in self.metadata.joint_names])
+        gravity_initialization = self._hold_stationary_for_imu()
+        self.imu_initialization = gravity_initialization.payload()
+        self.latest_sensor_packet = self.sensor_reader.read(self.data)
+        self.camera_to_base = self._profile_camera_to_base()
+        self.odometry = RGBDLocalOdometry(self.camera_to_base, tuple(self.profile['depth_range_m']))
+        self.runtime = SensorPolicyRuntime(old, self.metadata, obs_delay_steps=0, leg_action_delay_steps=0)
+        self.runtime.initialize(
+            self.latest_sensor_packet, -gravity_initialization.accelerometer_m_s2 / np.linalg.norm(gravity_initialization.accelerometer_m_s2),
+            np.zeros(3, dtype=np.float32), np.array([0., 1.], dtype=np.float32))
+        self.robot_state = None
         self.action = np.zeros(12, dtype=np.float32)
-        self.aux = np.zeros(6, dtype=np.float32)
+        _, self.aux = old.infer_policy_outputs(self.policy, self.runtime.policy_obs(), action_dim=12)
+        self.odometry.initialize_imu(gravity_initialization, self.velocity_estimate())
+        self.odometry.propagate_imu(self.latest_sensor_packet, self.velocity_estimate())
         self.phase = 0.
         self.force_walking = False
         self.renderer = mujoco.Renderer(self.model, height=self.profile['height'], width=self.profile['width']) if render else None
@@ -114,6 +129,25 @@ class A2Simulation:
             })
         (output / 'contact_geometry.json').write_text(json.dumps(geometry, indent=2))
 
+    def velocity_estimate(self):
+        # Pinned old checkpoint: training-origin/params/env.yaml pred.base_lin_vel
+        # uses scale=2.0; the exported decoder returns that scaled prediction.
+        return np.asarray(self.aux[:3], dtype=np.float64) / 2.
+
+    def record_sensors(self, output):
+        self.sensor_log = (output / 'sensors.jsonl').open('w', buffering=65536)
+        (output / 'estimator_initialization.json').write_text(json.dumps({
+            'stationary_imu': self.imu_initialization,
+            'velocity_estimate_body_m_s': self.velocity_estimate().tolist(),
+            'velocity_source': 'a2_policy_aux_divided_by_2'}, indent=2))
+        self._record_sensor_packet()
+
+    def _record_sensor_packet(self):
+        if self.sensor_log is not None:
+            self.sensor_log.write(json.dumps({**self.latest_sensor_packet.payload(),
+                'velocity_estimate_body_m_s': self.velocity_estimate().tolist(),
+                'velocity_source': 'a2_policy_aux_divided_by_2'}) + '\n')
+
     def write_contacts(self, sample_time, qpos, qvel):
         contacts = []
         for index in range(self.data.ncon):
@@ -130,15 +164,15 @@ class A2Simulation:
             self.contact_log.write(json.dumps({'sim_time_s': sample_time, 'qpos': qpos.tolist(),
                                                'qvel': qvel.tolist(), 'contacts': contacts}) + '\n')
 
-    def pose(self):
+    def truth_pose(self):
         return np.array([*self.data.qpos[:2], old.yaw_from_quat(self.data.qpos[3:7])])
 
-    def velocity(self):
+    def truth_velocity(self):
         return old.quat_inverse_rotate(self.data.qpos[3:7], self.data.qvel[:3])
 
-    def planar_twist(self):
+    def truth_planar_twist(self):
         """Actual [vx,vy,yaw_rate] in the base-yaw plane, not XYZ linear velocity."""
-        yaw = self.pose()[2]
+        yaw = self.truth_pose()[2]
         c, s = math.cos(yaw), math.sin(yaw)
         vx, vy = self.data.qvel[:2]
         rotation = self.data.xmat[self.base_id].reshape(3, 3)
@@ -148,6 +182,27 @@ class A2Simulation:
         derivative = np.cross(rotation @ self.data.qvel[3:6], forward)
         yaw_rate = (forward[0] * derivative[1] - forward[1] * derivative[0]) / np.dot(forward[:2], forward[:2])
         return np.array([c * vx + s * vy, -s * vx + c * vy, yaw_rate])
+
+    def _hold_stationary_for_imu(self):
+        """Plant-only default-joint hold before gravity is initialized from the IMU."""
+        target = np.asarray(self.metadata.default_joint_pos, dtype=np.float64)
+        gyro_samples, acceleration_samples = [], []
+        for index in range(int(round(1.5 / self.metadata.sim_dt))):
+            joint_position = self.data.qpos[self.bindings.qpos_indices]
+            joint_velocity = self.data.qvel[self.bindings.qvel_indices]
+            self.data.ctrl[self.bindings.actuator_indices] = (
+                self.gains[:, 0] * (target - joint_position) - self.gains[:, 1] * joint_velocity)
+            mujoco.mj_step(self.model, self.data)
+            packet = self.sensor_reader.read(self.data)
+            # Use the final stationary half-second, excluding the initial drop.
+            if index * self.metadata.sim_dt >= 1.0:
+                gyro_samples.append(packet.gyro_rad_s)
+                acceleration_samples.append(packet.accelerometer_m_s2)
+        mujoco.mj_forward(self.model, self.data)
+        latest = self.sensor_reader.read(self.data)
+        return SensorPacket(
+            stamp_s=latest.stamp_s, joint_position=latest.joint_position, joint_velocity=latest.joint_velocity,
+            gyro_rad_s=np.mean(gyro_samples, axis=0), accelerometer_m_s2=np.mean(acceleration_samples, axis=0))
 
     def step(self, requested, paused=False, force_local=(0., 0., 0.)):
         command = np.zeros(3, dtype=np.float32) if paused else np.asarray(requested, dtype=np.float32)
@@ -162,12 +217,15 @@ class A2Simulation:
         walking = not paused and (not standing or self.force_walking)
         self.phase = (self.phase + self.metadata.control_dt * self.metadata.gait_frequency_hz) % 1. if walking else 0.
         gait = np.array([math.sin(2 * math.pi * self.phase), math.cos(2 * math.pi * self.phase)], dtype=np.float32)
-        old.update_runtime_state_after_step(
-            self.data, self.bindings, self.metadata, self.runtime, action=self.action,
-            command_obs=old.build_command_vector(locomotion_cmd=command, metadata=self.metadata), gait_override=gait)
+        self.latest_sensor_packet = self.sensor_reader.read(self.data)
+        self.odometry.propagate_imu(self.latest_sensor_packet, self.velocity_estimate())
+        self.runtime.update(
+            self.latest_sensor_packet, self.odometry.gravity_base, action=self.action,
+            command_obs=old.build_command_vector(locomotion_cmd=command, metadata=self.metadata), gait=gait)
         self.action, self.aux = old.infer_policy_outputs(self.policy, self.runtime.policy_obs(), action_dim=12)
         if self.aux is None or self.aux.shape != (6,):
             raise RuntimeError('Prototype requires the selected old 6D A2 export (velocity + base force).')
+        self.odometry.propagate_imu(self.latest_sensor_packet, self.velocity_estimate())
         self.action = np.clip(self.action, -self.metadata.action_clip, self.metadata.action_clip)
         target = old.build_target_joint_positions(self.action, self.runtime, self.metadata)
         for _ in range(self.metadata.control_decimation):
@@ -183,13 +241,36 @@ class A2Simulation:
             mujoco.mj_step(self.model, self.data)
             if self.contact_log is not None:
                 self.write_contacts(sample_time, qpos, qvel)
-        mujoco.mj_forward(self.model, self.data)
+            # Refresh sensor values at the new timestamp and consume every IMU
+            # sample, not just the last of four physics ticks in a policy step.
+            mujoco.mj_forward(self.model, self.data)
+            self.latest_sensor_packet = self.sensor_reader.read(self.data)
+            self.odometry.propagate_imu(self.latest_sensor_packet, self.velocity_estimate())
+            self._record_sensor_packet()
         return command
 
-    def world_from_base(self):
+    def truth_world_from_base(self):
         transform = np.eye(4)
         transform[:3, :3] = self.data.xmat[self.base_id].reshape(3, 3)
         transform[:3, 3] = self.data.xpos[self.base_id]
+        return transform
+
+    def _profile_camera_to_base(self):
+        """Fixed D435i optical-to-base calibration, independent of MuJoCo camera truth."""
+        pitch = math.radians(self.profile['pitch_down_deg'])
+        base_from_optical_nominal = np.array([
+            [0., 0., 1.],
+            [-1., 0., 0.],
+            [0., -1., 0.],
+        ])
+        pitch_down = np.array([
+            [math.cos(pitch), 0., math.sin(pitch)],
+            [0., 1., 0.],
+            [-math.sin(pitch), 0., math.cos(pitch)],
+        ])
+        transform = np.eye(4)
+        transform[:3, :3] = pitch_down @ base_from_optical_nominal
+        transform[:3, 3] = np.asarray(self.profile['position_base_m'], dtype=np.float64)
         return transform
 
     def capture(self, frame_id):
@@ -199,22 +280,23 @@ class A2Simulation:
         self.renderer.enable_depth_rendering()
         depth_z_m = self.renderer.render()
         self.renderer.disable_depth_rendering()
-        # MuJoCo camera is x-right/y-up/z-back; optical is x-right/y-down/z-forward.
-        base = self.world_from_base()
-        optical_world = np.eye(4)
-        optical_world[:3, :3] = self.data.cam_xmat[self.camera_id].reshape(3, 3) @ np.diag([1., -1., -1.])
-        optical_world[:3, 3] = self.data.cam_xpos[self.camera_id]
-        camera_to_base = np.linalg.inv(base) @ optical_world
         height, width = pixels.shape[:2]
         focal = height / (2 * math.tan(math.radians(self.profile['fovy_deg']) / 2))
+        self.robot_state = self.odometry.update(
+            stamp_s=self.latest_sensor_packet.stamp_s, depth_z_m=depth_z_m,
+            intrinsics={'fx': focal, 'fy': focal, 'cx': (width - 1) / 2, 'cy': (height - 1) / 2})
+        geometry = DepthImage(frame_id, self.robot_state, depth_z_m,
+            {'fx': focal, 'fy': focal, 'cx': (width-1)/2, 'cy': (height-1)/2},
+            self.camera_to_base, tuple(self.profile['depth_range_m']))
         return DepthFrame(
-            frame_id=frame_id, sim_time_s=float(self.data.time), pose_world=self.pose(),
-            rgb=pixels, depth_z_m=depth_z_m,
+            geometry=geometry, frame_id=frame_id, state=self.robot_state, rgb=pixels, depth_z_m=depth_z_m,
             intrinsics={'fx': focal, 'fy': focal, 'cx': (width - 1) / 2, 'cy': (height - 1) / 2},
-            camera_to_base=camera_to_base, world_from_base=base,
+            camera_to_base=self.camera_to_base,
             valid_range_m=tuple(self.profile['depth_range_m']))
 
     def close(self):
+        if self.sensor_log is not None:
+            self.sensor_log.close()
         if self.contact_log is not None:
             self.contact_log.close()
         if self.renderer:

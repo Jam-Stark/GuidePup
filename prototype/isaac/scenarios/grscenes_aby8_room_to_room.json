@@ -1,0 +1,171 @@
+{
+  "name": "grscenes_aby8_room_to_room",
+  "asset": ".local/assets/GRScenes/integrations/MWF4WLIKTIFZIAABAAAAABY8_usd/environment.usda",
+  "asset_source": "https://huggingface.co/datasets/InternRobotics/GRScenes",
+  "scene_id": "MWF4WLIKTIFZIAABAAAAABY8_usd",
+  "spawn_xyz_yaw_deg": [
+    -1.0,
+    9.90227212,
+    0.55,
+    0.0
+  ],
+  "goal": "走出当前房间后向右沿走廊走，进入走廊对侧第一间宽门洞敞开的房间，直到整个机身进入后停下。",
+  "semantic_classes": [
+    "door",
+    "doorframe",
+    "wall",
+    "bed",
+    "cabinet",
+    "chair",
+    "desk"
+  ],
+  "interaction": "none",
+  "offline_evaluation": {
+    "scope": "Scene transforms and geometry for initialization and independent evaluation only; never supplied to navigation or models.",
+    "portals": [
+      {
+        "id": "source_room_exit",
+        "frame_prim": "/Root/Meshes/Base/wall/model_b133a515cfc09a17ee5856c5023fd18e_0",
+        "wall_side_prims": [
+          "/Root/Meshes/Base/wall/model_b133a515cfc09a17ee5856c5023fd18e_0",
+          "/Root/Meshes/Base/wall/model_50477fe1deb0255cd6291289e3aded10_0"
+        ],
+        "leaf_prim": "/Root/Meshes/BaseAnimation/door/model_59f42b3ab8871994155d1ef72fefcdd8_0",
+        "door_state": "inactive in shipped navigation USD; not edited by this experiment",
+        "x_slab_m": [
+          0.9825809472587844,
+          1.1025809490469238
+        ],
+        "plane_x_m": 1.042580948152854,
+        "structural_clear_y_interval_at_z_0_5_m": [
+          9.302272599552161,
+          10.50227164087104
+        ],
+        "preferred_crossing_xy_m": [
+          1.042580948152854,
+          9.9022721202116
+        ],
+        "crossing_direction": "+X",
+        "geometry_basis": "All active architectural meshes at z=0.1,0.3,0.5,0.7,1.0m; wall aperture not disabled door bounds"
+      },
+      {
+        "id": "target_room_entry",
+        "frame_prim": "/Root/Meshes/Base/wall/model_cd3f6a41c461ad675f8e02bbb5d036a9_0",
+        "wall_side_prims": [
+          "/Root/Meshes/Base/wall/model_cd3f6a41c461ad675f8e02bbb5d036a9_0",
+          "/Root/Meshes/Base/wall/model_a5a8d504552ec0715570eb5464f0a4ac_0"
+        ],
+        "leaf_prim": "/Root/Meshes/BaseAnimation/door/model_a008a2d7e04f70fd39f7bd991b0c68a3_0",
+        "door_state": "inactive in shipped navigation USD; not edited by this experiment",
+        "x_slab_m": [
+          3.1025811009195605,
+          3.2225811027077
+        ],
+        "plane_x_m": 3.1625811018136303,
+        "structural_clear_y_interval_at_z_0_5_m": [
+          5.282272051368237,
+          7.08227158990907
+        ],
+        "preferred_crossing_xy_m": [
+          3.1625811018136303,
+          6.182271820638653
+        ],
+        "crossing_direction": "+X",
+        "geometry_basis": "All active architectural meshes at z=0.1,0.3,0.5,0.7,1.0m; wall aperture not disabled door bounds"
+      }
+    ],
+    "source_room": {
+      "semantic": "initial room",
+      "floor_prim": "/Root/Meshes/Base/other/model_cac5c50dbdc89b0d3a8dfdade54b7d44_0",
+      "interior_xy_bounds_m": [
+        -5.097418044707447,
+        0.9825809472587844,
+        9.202272598062045,
+        13.20227265766669
+      ],
+      "interior_polygon_xy_m": [
+        [
+          0.9825809472587844,
+          9.202272598062045
+        ],
+        [
+          0.9825809472587844,
+          10.60227261892367
+        ],
+        [
+          -1.1374190843316774,
+          10.60227261892367
+        ],
+        [
+          -1.1374190843316774,
+          13.20227265766669
+        ],
+        [
+          -5.097418044707447,
+          13.20227265766669
+        ],
+        [
+          -5.097418044707447,
+          9.202272598062045
+        ]
+      ]
+    },
+    "destination_room": {
+      "semantic": "room through the wider opposite opening",
+      "floor_prim": "/Root/Meshes/Base/other/model_41d6a40376bbfd2c9f536d01a94ecc42_0",
+      "interior_xy_bounds_m": [
+        3.2225811027077,
+        11.22258122191699,
+        3.0822725068669388,
+        9.082272596273906
+      ],
+      "interior_polygon_xy_m": [
+        [
+          11.22258122191699,
+          3.0822725068669388
+        ],
+        [
+          11.22258122191699,
+          9.082272596273906
+        ],
+        [
+          3.8225808675077677,
+          9.082272596273906
+        ],
+        [
+          3.8225808675077677,
+          8.882272593293674
+        ],
+        [
+          3.2225811027077,
+          8.882272593293674
+        ],
+        [
+          3.2225811027077,
+          3.282272509847171
+        ],
+        [
+          3.8225808675077677,
+          3.282272509847171
+        ],
+        [
+          3.8225808675077677,
+          3.0822725068669388
+        ]
+      ]
+    },
+    "geometry_evidence": ".local/outputs/grscenes_room_to_room_20260920_01/research/geometry/whole_room.json",
+    "geometry_limits": "Architectural floor and apertures measured from native meshes. Whole-room polygon excludes real corner columns; furniture is not room boundary. Contact and geometry evidence do not certify a collision-free route."
+  },
+  "experiment": {
+    "whole_task_timeout_s": null,
+    "decision_timeout_s": 30,
+    "max_recoveries": 3,
+    "physical_gpu": 7,
+    "scope": "One fresh task, no force or manual pause/resume; original A2/LightNav/Qwen/MPPI; independent10cm footprint",
+    "asset_scale": 0.01,
+    "asset_yaw_deg": 90,
+    "placement_status": "Accepted full-asset RGB-D preview; hospital source doorway visible, initial tracking valid; upstream texture defects recorded separately"
+  },
+  "disable_ujitso_cooking": true
+}

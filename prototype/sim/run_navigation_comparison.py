@@ -47,7 +47,7 @@ def prepare(output):
             'cohorts': cohorts, 'poses': poses, 'trials': trials,
             'sampling': {'definition': 'Exact previous admitted poses and arm ordering; two populations reported separately.',
                          'cohorts': cohorts},
-            'timeout_s': 360, 'decision_timeout_s': 30, 'max_recoveries': 3,
+            'timeout_s': None, 'decision_timeout_s': 30, 'max_recoveries': 3,
             'renderer_environment': gpu_environment,
             'physical_gpu_binding': binding,
             'source_snapshot': str(destination / 'source_snapshot'),

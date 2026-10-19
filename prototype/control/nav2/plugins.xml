@@ -1,0 +1,3 @@
+<library path="guidepup_envelope">
+  <class name="mppi::critics::GuidePupEnvelopeCritic" type="mppi::critics::GuidePupEnvelopeCritic" base_class_type="mppi::critics::CriticFunction"><description>Observed depth three-circle and calibrated stopping envelope.</description></class>
+</library>

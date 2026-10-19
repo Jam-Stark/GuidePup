@@ -1,0 +1,90 @@
+{
+  "name": "hospital_two_rooms",
+  "asset": ".local/assets/isaac/Isaac/Environments/Hospital/hospital.usd",
+  "asset_source": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Hospital/hospital.usd",
+  "spawn_xyz_yaw_deg": [
+    12.8,
+    3.35,
+    0.55,
+    0
+  ],
+  "goal": "走出当前房间，穿过走廊，进入对面右侧开着门的房间，整个机身进门后停下。",
+  "semantic_classes": [
+    "door",
+    "doorframe",
+    "wall",
+    "chair",
+    "desk",
+    "toilet",
+    "cabinet"
+  ],
+  "interaction": "none",
+  "offline_evaluation": {
+    "scope": "Experiment placement and post-run scoring only; never supplied to navigation or models.",
+    "portals": [
+      {
+        "frame_prim": "/Root/Geo_M_DoorFrame34",
+        "leaf_prim": "/Root/SM_Door_2",
+        "native_door_pose_preserved": true,
+        "x_slab_m": [
+          14.016414,
+          14.181879
+        ],
+        "plane_x_m": 14.1,
+        "structural_clear_y_interval_at_z_0_5_m": [
+          2.6401,
+          3.88299
+        ],
+        "preferred_crossing_xy_m": [
+          14.1,
+          3.35
+        ],
+        "crossing_direction": "+X",
+        "id": "room_a_exit"
+      },
+      {
+        "frame_prim": "/Root/Geo_M_DoorFrame26",
+        "leaf_prim": "/Root/SM_Door_02b2",
+        "native_door_pose_preserved": true,
+        "x_slab_m": [
+          20.745908,
+          20.911374
+        ],
+        "plane_x_m": 20.8,
+        "structural_clear_y_interval_at_z_0_5_m": [
+          -1.39952,
+          -0.15664
+        ],
+        "preferred_crossing_xy_m": [
+          20.8,
+          -0.8
+        ],
+        "crossing_direction": "+X",
+        "threshold_max_z_m": 0.025361,
+        "id": "room_b_entry"
+      }
+    ],
+    "destination_room": {
+      "semantic": "office room",
+      "floor_prim": "/Root/Geo_o_Floor_936",
+      "interior_xy_bounds_m": [
+        20.95,
+        25.25,
+        -4.15,
+        2.65
+      ]
+    },
+    "source_room": {
+      "semantic": "toilet room",
+      "floor_prim": "/Root/Geo_M3_Floor_396",
+      "interior_xy_bounds_m": [
+        11.3,
+        14.0,
+        0.85,
+        4.0
+      ]
+    },
+    "geometry_evidence": "Full composed USD with zero missing-layer warnings; all-mesh world-space cross-section at z=0.5m. Original shipped leaves are open, no door geometry edits. Native physics groundplane at z=0, native triangle mesh collisions on architecture/props.",
+    "geometry_limits": "Candidate only: not a rendered validation, full-body swept collision proof, or successful robot execution. Main must render and confirm RGB-D/physical route before formal run. Room bounds are useful interior extents, not obstacle-free polygons."
+  }
+}

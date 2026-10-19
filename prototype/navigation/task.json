@@ -1,0 +1,12 @@
+{
+  "name": "campus_floor1_elevator2_to_entrance",
+  "asset": ".local/assets/campus_mf_r1/integration/environment.usda",
+  "spawn_xyz_yaw_deg": [
+    12.51,
+    -2.45,
+    0.55,
+    180.0
+  ],
+  "goal": "Find the building exit and stop near it.",
+  "selection_status": "Owner selected elevator-front start and Entrance A. The middle elevator E2 is used, initially facing along the corridor toward the lobby. Spawn coordinates are plant initialization only; no target coordinates or scene map go online."
+}

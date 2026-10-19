@@ -81,7 +81,7 @@ def prepare(output, seed, pose_count, model):
         'sampling': {'xy_bounds_m': [[1.65, 4.35], [-7.55, -5.05]], 'yaw_bounds_deg': [-180, 180],
                      'yaw_strata': pose_count, 'minimum_initial_footprint_clearance_m': footprint['desired_clearance_m'],
                      'definition': 'Random room interior positions with the fixed three-circle footprint clear of collision-enabled scene boxes below 0.8m; all yaw sectors retained.'},
-        'timeout_s': 360, 'max_recoveries': 3, 'decision_timeout_s': 30,
+        'timeout_s': None, 'max_recoveries': 3, 'decision_timeout_s': 30,
         'renderer_environment': {key: os.environ[key] for key in (
             'MUJOCO_GL', 'MUJOCO_EGL_DEVICE_ID', '__EGL_VENDOR_LIBRARY_FILENAMES',
             'LIBGL_ALWAYS_SOFTWARE', 'GALLIUM_DRIVER', 'LP_NUM_THREADS') if key in os.environ},
@@ -114,7 +114,7 @@ def run(output):
                    '--model', manifest['model_profile'],
                    '--record-navigation-inputs',
                    '--spawn-pose', *map(str, trial['pose_xy_yaw_deg']),
-                   '--timeout-s', str(manifest['timeout_s']), '--max-recoveries', str(manifest['max_recoveries']),
+                   '--max-recoveries', str(manifest['max_recoveries']),
                    '--decision-timeout-s', str(manifest['decision_timeout_s'])]
         if trial['arm'] == 'primary':
             command += ['--scene', manifest['scene'], '--goal', manifest['goal']]

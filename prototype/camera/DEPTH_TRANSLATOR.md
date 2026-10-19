@@ -1,10 +1,12 @@
+> 2026-09-16：当前状态接口已改为传感器估计的 `RobotState`，见 [ROBOT_STATE.md](../ROBOT_STATE.md)。不再接受独立的世界真值位姿或变换。
+
 # 同帧 RGB-D 深度翻译器
 
-`prototype/sim/depth.py` 使用现有 NumPy/Pillow，把同一相机帧的米制深度转成可核对的普通数据，不包含物体识别、导航决策或物体距离猜测。当前数据来源始终标记为 `synthetic_mujoco_rgbd` / `synthetic: true`；这是理想渲染结果，不代表 D435i 的实测噪声、孔洞或反光表面表现。
+`prototype/sim/depth.py` 使用现有 NumPy/Pillow，把同一相机帧的米制深度转成可核对的普通数据，不包含物体识别、导航决策或物体距离猜测。几何合同标记为 `aligned_rgbd_with_sensor_odometry`；当前仿真 adapter 仍生成理想 RGB-D，其来源见运行配置，不代表 D435i 的实测噪声、孔洞或反光表面表现。
 
 ```python
 frame = DepthFrame(
-    frame_id, sim_time_s, pose_world,          # 唯一帧号、拍摄仿真时间、拍摄时 SE2
+    frame_id, state,                        # 唯一帧号、曝光时的 RobotState
     rgb, depth_z_m,                           # uint8[H,W,3] RGB；float[H,W] 光轴 Z，米
     intrinsics={'fx': fx, 'fy': fy, 'cx': cx, 'cy': cy},
     camera_to_base=T_base_optical,            # 4×4，同一 optical frame → robot base

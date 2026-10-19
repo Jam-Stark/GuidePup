@@ -1,0 +1,56 @@
+{
+  "name": "campus_mf_r1_elevator_2_first_floor",
+  "asset": ".local/assets/campus_mf_r1/integration/environment.usda",
+  "asset_source": "Owner-provided 多楼层场景包_MF-R1.zip (MF-R1, 2026-10-15)",
+  "spawn_xyz_yaw_deg": [
+    0.0,
+    2.0,
+    0.55,
+    -20.0
+  ],
+  "goal": "从一层当前起点走到中间的2号电梯门前，朝向电梯门并停下。",
+  "semantic_classes": [
+    "elevator door",
+    "door",
+    "doorframe",
+    "wall",
+    "sign",
+    "chair",
+    "cabinet"
+  ],
+  "interaction": "none",
+  "offline_evaluation": {
+    "task_kind": "approach_target",
+    "scope": "Scene geometry is initialization and independent scoring only. It is never supplied as online localization or a route.",
+    "target_plane": {
+      "point_world_m": [
+        12.510000000000005,
+        -3.7225000050514936,
+        0.0
+      ],
+      "approach_normal_xy": [
+        0.0,
+        1.0
+      ],
+      "identity": "First-floor middle elevator 2 landing doors",
+      "prim_paths": [
+        "/World/Elevator/Landing1L",
+        "/World/Elevator/Landing1R"
+      ],
+      "geometry_basis": "Front (+Y) face of the source Landing1L/R world bounds; panel centre is at -3.740m."
+    },
+    "geometry_limits": "Source model is a reconstruction. Elevator cabin and 11.10m floor stacking are approximate, not measured. Waiting-zone tolerances come from the unchanged navigation contract. Full A2 doorway traversal and riding are unverified."
+  },
+  "environment_metadata": {
+    "floor_z_m": {
+      "1": 0,
+      "3": 11.1
+    },
+    "height_is_measured": false,
+    "active_elevator": 2,
+    "controller_loaded": false,
+    "initial_elevator_state": "Closed, first floor",
+    "provided_controller": "多楼层场景包_MF-R1/多楼层场景资源/scripts/elevator_controller.py",
+    "task_scope": "First-floor approach only. No elevator motion or automated multi-floor task scheduling."
+  }
+}

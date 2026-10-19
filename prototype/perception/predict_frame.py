@@ -10,7 +10,9 @@ import sys
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'sim'))
-from depth import DepthFrame
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from robot.state import RobotState
+from depth import DepthFrame, DepthImage
 from semantic_depth import YOLOESemanticDepth
 
 
@@ -23,10 +25,13 @@ def main():
     parser.add_argument('--confidence', type=float, default=0.03)
     args = parser.parse_args()
     with np.load(args.frame) as archive:
-        frame = DepthFrame(archive['frame_id'].item(), archive['sim_time_s'].item(),
-                           archive['pose_world'], archive['rgb'], archive['depth_z_m'],
-                           dict(zip(('fx', 'fy', 'cx', 'cy'), archive['intrinsics'])),
-                           archive['camera_to_base'], archive['world_from_base'])
+        state = RobotState.from_payload(json.loads(archive['robot_state_json'].item()))
+        geometry = DepthImage(archive['frame_id'].item(), state, archive['native_depth_z_m'],
+            dict(zip(('fx', 'fy', 'cx', 'cy'), archive['native_depth_intrinsics'])),
+            archive['native_depth_camera_to_base'])
+        frame = DepthFrame(archive['frame_id'].item(), state, archive['rgb'], archive['depth_z_m'],
+            dict(zip(('fx', 'fy', 'cx', 'cy'), archive['intrinsics'])),
+            archive['camera_to_base'], geometry=geometry)
     detector = YOLOESemanticDepth(args.checkpoint, args.device, confidence=args.confidence)
     result = detector.predict(frame)
     args.output.mkdir(parents=True, exist_ok=False)

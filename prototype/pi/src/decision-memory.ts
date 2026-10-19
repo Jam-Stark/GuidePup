@@ -6,14 +6,14 @@ export interface DecisionMemory {
   stageIndex: number;
   targetId: string;
   observation: {
-    id: string; imagePath: string; simTimeS: number; poseWorld: number[];
+    id: string; imagePath: string; stampS: number; epoch: string; poseOdom: number[];
   };
   decision: {
     maneuver: string; instruction: string; expectedEffect: string;
-    controlTaskId: string; acceptedSimTimeS: number;
+    controlTaskId: string; acceptedStampS: number;
     turnDegrees?: number; advanceMeters?: number;
     semanticInstruction?: string; referenceSource?: string;
-    goalPointWorld?: number[]; goalHeadingRad?: number;
+    goalPointOdom?: number[]; goalHeadingRad?: number;
   };
   motion: MotionSegment | null;
 }
@@ -26,13 +26,14 @@ export function memoryContext(memory: DecisionMemory | undefined): unknown {
   return {
     id: memory.id, stageIndex: memory.stageIndex, targetId: memory.targetId,
     observation, decision: memory.decision,
-    interval: motion && { startSimTimeS: motion.start_sim_time_s, endSimTimeS: motion.end_sim_time_s },
-    actualMotion: motion && { ...motion.actual, samples: motion.actual.samples.map(sample => ({
-      sim_time_s: Math.round(sample.sim_time_s * 100) / 100, pose_world: rounded(sample.pose_world) })) },
-    lightnavPlans: motion?.plans.map(plan => ({ ...plan, capture_pose_world: rounded(plan.capture_pose_world),
-      waypoints_world: plan.waypoints_world.map(rounded) })),
+    interval: motion && { startStampS: motion.start_stamp_s, endStampS: motion.end_stamp_s },
+    estimatedMotion: motion && { ...motion.estimated, samples: motion.estimated.samples.map(sample => ({
+      stamp_s: Math.round(sample.stamp_s * 100) / 100, pose_odom: rounded(sample.pose_odom) })) },
+    lightnavPlans: motion?.plans.map(plan => ({ ...plan, capture_pose_odom: rounded(plan.capture_pose_odom),
+      waypoints_odom: plan.waypoints_odom.map(rounded) })),
     planCount: motion?.plan_count,
     controlEvents: motion?.events,
-    interpretation: "Actual motion is measured simulator odometry. LightNav predicts the semantic stage goal continuously. Explicit metric maneuvers use their own MPC reference, so these LightNav chunks are advice, not executed motion. Chunks overlap and are not traveled distance.",
+    appliedControl: motion?.control_execution,
+    interpretation: "Motion is estimated from depth/IMU/proprioception. referenceSource=lightnav means the local controller consumes model trajectories; metric sources mean geometry control or an explicit recovery/observation action. appliedControl summarizes commands actually sent, not physical displacement. Plans are predictions, may overlap, and are not traveled distance. Actual source/adoption is recorded in local controller logs.",
   };
 }

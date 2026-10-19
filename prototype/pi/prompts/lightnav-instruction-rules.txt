@@ -1,0 +1,74 @@
+LIGHTNAV TASK-INSTRUCTION RULES
+
+Source: https://github.com/lightorigins/LightNav-0#%EF%B8%8F-prompt-guide
+These rules guide the English task instruction you choose. They do not change your
+decision authority, the user's task, completion convention or execution permissions.
+
+Prefer a direct action verb, one unambiguous visual target, an optional direction,
+and an optional "and stop". Go to, Walk to, Head to, Walk towards and Approach are
+all suitable. Write a complete executable instruction, not just "continue" or a
+reference to your reason field. Prefer a short instruction for the current goal;
+keep your analysis, uncertainty and recovery diagnosis in the decision fields.
+
+Choose ONE primary way to distinguish the target; do not stack every kind of cue:
+1. Direction plus object is the first choice. Indoor directions such as front-left,
+   front-right and in front are relative to the robot in the CURRENT observation.
+2. A relation such as next to, on or behind can identify the object instead. Use a
+   large, salient reference object that is actually supported by the supplied RGB.
+3. A directly visible extreme such as leftmost/rightmost is preferable to
+   nearest/farthest, which requires judging depth.
+4. Ordinals are the last choice. Supply the counting direction; avoid ordinals
+   beyond third. If the user's requested instance cannot be identified this way,
+   preserve that uncertainty and choose further observation rather than substituting it.
+
+Do not invent target appearance, hidden layout, coordinates or visible signage.
+An operator's map label is not automatically a name the camera can recognize.
+Preserve the user's intended target and constraints. Use a concrete visible object
+description when evidence supports it. These are prompting preferences, not a claim
+that the model cannot follow a longer route. You may choose a useful subgoal while
+retaining responsibility for the original task; no program advances it for you.
+
+VISUAL TARGET HANDOFF (coordinator policy)
+
+A navigate decision proposes a full instruction plus target.frame_id and target.bbox_xyxy
+on current_observation's original RGB. Normalize [x0,y0,x1,y1] by original width/height;
+select the visible object, never a guessed location or a box on an older/contact-sheet image.
+If the destination is unknown, observe first or select a clearly visible local observation
+subgoal without claiming it is the destination. For a side-facing target, prefer a turn
+and fresh-frame selection. The box is GPT/coordinator evidence, not a new LightNav input.
+The runtime sends that exact original JPEG while standing and withholds MPPI motion.
+At NAVIGATION_TARGET_REVIEW, compare pending_navigation's first pointing to the intended
+object on the same source image. You decide identity; no mechanical overlap test or
+read-only Monitor can approve it. Missing or edge/clamped pointing remains uncertain.
+confirm_navigation authorizes the pending instruction/reference unchanged, with instruction,
+target and all motion parameters null. Otherwise revise navigate using current-image evidence,
+observe, or choose help/completion only as the original task intent and evidence allow.
+Normal navigation continues after this one goal-handoff review, without per-step review.
+
+STOP FEEDBACK (planner policy, informed by the protocol and our execution evidence)
+Source: https://github.com/lightorigins/LightNav-0/blob/main/docs/PROTOCOL.md
+
+STOP says the model predicted zero motion; it does not certify arrival or explain
+why it stopped. visible=true is a model prediction, not verified target identity.
+Read the CURRENT RGB together with the exact model-input RGB on which pointing was
+predicted. Pointing pixels refer to that labelled source image and its frame_size,
+not a newer image. A clamped point is at a boundary or beyond it; it is not a reliable
+interior target location. Missing pointing remains unknown.
+
+Compare the model's target point with the intended object visible in that image,
+then compare action-start/current RGB, commands actually sent and estimated motion.
+Commanded or predicted distance is not distance travelled. Odom motion is a drifting
+sensor estimate and cannot prove target-relative distance or task completion.
+Use previous attempts to avoid spending each recovery on the same interpretation.
+
+If you choose to continue, issue a new full instruction grounded in the current RGB.
+For an apparent wrong target, improve the identifying cue; for a still-distant
+correct target, state the positive approach goal clearly. If identity is unknown,
+you may choose a useful observation goal without claiming the target was found.
+Distinguish observed incompletion, unconfirmed completion and uncertain identity.
+Do not invent certainty that a doorway has not been traversed from missing evidence.
+Retain required stopping behaviour; never request indefinite motion or suppression
+of STOP. The coordinator sends your instruction unchanged and preserves the current
+navigation session/history. Observation and recovery counts are uncapped; there is
+no GPT per-decision thinking-time or whole-task deadline. Individual physical action
+bounds and the automatic force-stop/human-brake authority boundaries still apply.

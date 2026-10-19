@@ -29,9 +29,12 @@ def snapshot_sources(output):
     destination.mkdir()
     shutil.copytree(ROOT / 'prototype/pi/src', destination / 'pi_src')
     shutil.copytree(ROOT / 'prototype/control', destination / 'control')
+    shutil.copytree(ROOT / 'prototype/robot', destination / 'robot')
+    shutil.copytree(ROOT / 'prototype/isaac', destination / 'isaac', ignore=shutil.ignore_patterns('__pycache__'))
+    shutil.copytree(ROOT / 'prototype/camera', destination / 'camera', ignore=shutil.ignore_patterns('__pycache__'))
     shutil.copytree(ROOT / 'prototype/sim/scenes', destination / 'scenes')
     shutil.copytree(ROOT / 'prototype/perception', destination / 'perception')
-    for name in ('server.py', 'a2.py', 'depth.py', 'semantic_depth.py', 'motion_segment.py', 'record_task.py', 'record_monitor.py', 'evaluate_monitor.py', 'evaluate_navigation_v2.py', 'evaluate_navigation_stress.py', 'run_navigation_stress.py', 'run_navigation_comparison.py', 'run_framework_reproductions.py'):
+    for name in ('server.py', 'a2.py', 'depth.py', 'depth_map.py', 'truth.py', 'semantic_depth.py', 'motion_segment.py', 'record_task.py', 'record_monitor.py', 'evaluate_monitor.py', 'evaluate_navigation_v2.py', 'evaluate_navigation_stress.py', 'run_navigation_stress.py', 'run_navigation_comparison.py', 'run_framework_reproductions.py'):
         shutil.copy2(ROOT / 'prototype/sim' / name, destination / name)
     for name in ('gpu.sh', 'gpu.py', 'stack.py'):
         shutil.copy2(ROOT / 'prototype' / name, destination / name)
@@ -95,7 +98,7 @@ async def run(args):
                       else ['bash', str(ROOT / 'prototype/pi/run.sh')])
         process = await asyncio.create_subprocess_exec(
             *pi_command, 'run', args.goal,
-            '--timeout-s', str(args.timeout_s), '--max-recoveries', str(args.max_recoveries),
+            '--max-recoveries', str(args.max_recoveries),
             '--decision-timeout-s', str(args.decision_timeout_s),
             '--log', str(output / 'agent.jsonl'), cwd=ROOT, env=environment,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
@@ -127,13 +130,13 @@ async def run(args):
         # Archive the terminal observation for offline geometry evaluation only.
         observation = await get_json('/scene')
         (output / 'terminal_frame.json').write_text(json.dumps(
-            {k: observation[k] for k in ('frame_id', 'sim_time_s', 'pose_world')}, indent=2))
+            {k: observation[k] for k in ('frame_id', 'stamp_s', 'robot_state')}, indent=2))
         summary = {'scene': args.scene, 'goal': args.goal, 'exit_code': code,
                    'model_profile': args.model, 'decision_timeout_s': args.decision_timeout_s,
                    'requested_spawn_pose_xy_yaw_deg': args.spawn_pose,
                    'record_navigation_inputs': args.record_navigation_inputs,
                    'elapsed_wall_s': time.monotonic() - started,
-                   'timeout_s': args.timeout_s, 'max_recoveries': args.max_recoveries,
+                   'timeout_s': None, 'max_recoveries': args.max_recoveries,
                    'before': before, 'final': final}
         (output / 'summary.json').write_text(json.dumps(summary, ensure_ascii=False, indent=2) + '\n')
         print(json.dumps({'exit_code': code, 'final_state': final['state'], 'output': str(output)}))
@@ -146,7 +149,6 @@ if __name__ == '__main__':
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--spawn-pose', type=float, nargs=3, metavar=('X', 'Y', 'YAW_DEG'))
     parser.add_argument('--record-navigation-inputs', action='store_true')
-    parser.add_argument('--timeout-s', default=180, type=float)
     parser.add_argument('--max-recoveries', default=3, type=int)
     parser.add_argument('--model', choices=['qwen', 'gemini'], default='qwen')
     parser.add_argument('--decision-timeout-s', default=30, type=int)

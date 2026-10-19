@@ -1,6 +1,7 @@
 # C++
 **/cmake-build*/
 **/build*/
+/CMakeFiles/
 **/*.so
 **/*.log*
 

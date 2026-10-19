@@ -1,19 +1,34 @@
 {
-  "default_profile": "d435i_rgb_nominal",
+  "default_profile": "a2_head_isaaclab",
   "profiles": {
     "a2_head_isaaclab": {
       "width": 768,
       "height": 272,
       "hfov_deg": 132.0,
       "fovy_deg": 77.0024873497374,
-      "position_base_m": [0.3381, 0.0336, 0.0525],
+      "position_base_m": [
+        0.3381,
+        0.0336,
+        0.0525
+      ],
       "pitch_down_deg": 0.0,
       "update_period_s": 0.06666666666666667,
-      "clipping_range_m": [0.1, 20.0],
+      "clipping_range_m": [
+        0.1,
+        20.0
+      ],
       "source_parent_frame": "trunk",
-      "source_rotation_wxyz": [1.0, 0.0, 0.0, 0.0],
+      "source_rotation_wxyz": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
       "source_convention": "world",
-      "source_resolution_wh": [384, 136],
+      "source_resolution_wh": [
+        384,
+        136
+      ],
       "source_focal_length": 1.0,
       "source_horizontal_aperture": 4.492073547808433,
       "source_vertical_aperture": 1.59094271484882
@@ -23,18 +38,52 @@
       "height": 360,
       "hfov_deg": 69.0,
       "fovy_deg": 42.2726,
-      "position_base_m": [0.30, 0.0, 0.10],
+      "position_base_m": [
+        0.3,
+        0.0,
+        0.1
+      ],
       "pitch_down_deg": 5.0,
       "update_period_s": 0.1,
-      "clipping_range_m": [0.1, 20.0],
-      "depth_range_m": [0.2, 8.0]
+      "clipping_range_m": [
+        0.1,
+        20.0
+      ],
+      "depth_range_m": [
+        0.2,
+        8.0
+      ],
+      "native_depth": {
+        "width": 848,
+        "height": 496,
+        "hfov_deg": 87.0,
+        "fovy_deg": 58.06534541166598,
+        "optical_offset_m": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "calibration_basis": "Nominal D435i full depth FOV sampled by a native square-pixel RTX 848x496 raster (approximately87x58.07 degrees); 848x496 is a simulation render raster, not a hardware stream mode. Ideal co-located RGB/depth optical centers; actual device extrinsics unavailable. Runtime K is read from the actual native camera.",
+        "nominal_fov_deg": [
+          87.0,
+          58.0
+        ],
+        "nominal_stream_resolution": [
+          848,
+          480
+        ]
+      }
     },
     "lightnav_112_reference": {
       "width": 640,
       "height": 360,
       "hfov_deg": 112.0,
       "fovy_deg": 79.6522,
-      "position_base_m": [0.30, 0.0, 0.10],
+      "position_base_m": [
+        0.3,
+        0.0,
+        0.1
+      ],
       "pitch_down_deg": 5.0,
       "update_period_s": 0.1
     }

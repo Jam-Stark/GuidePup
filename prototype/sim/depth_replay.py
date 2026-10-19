@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 from typing import Literal
 
@@ -11,7 +12,9 @@ import uvicorn
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from depth import DepthFrame
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from robot.state import RobotState
+from depth import DepthFrame, DepthImage
 
 
 class Region(BaseModel):
@@ -21,10 +24,13 @@ class Region(BaseModel):
 
 def load_frame(path: Path) -> DepthFrame:
     with np.load(path) as data:
-        return DepthFrame(str(data['frame_id'].item()), float(data['sim_time_s']),
-                          data['pose_world'], data['rgb'], data['depth_z_m'],
-                          dict(zip(('fx', 'fy', 'cx', 'cy'), data['intrinsics'])),
-                          data['camera_to_base'], data['world_from_base'])
+        state = RobotState.from_payload(json.loads(data['robot_state_json'].item()))
+        geometry = DepthImage(data['frame_id'].item(), state, data['native_depth_z_m'],
+            dict(zip(('fx', 'fy', 'cx', 'cy'), data['native_depth_intrinsics'])),
+            data['native_depth_camera_to_base'])
+        return DepthFrame(data['frame_id'].item(), state, data['rgb'], data['depth_z_m'],
+            dict(zip(('fx', 'fy', 'cx', 'cy'), data['intrinsics'])),
+            data['camera_to_base'], geometry=geometry)
 
 
 def baseline_statistics(metadata: dict) -> None:
@@ -54,8 +60,8 @@ def make_app(manifest_path: Path) -> FastAPI:
     def status(case_id: str):
         frame = get_frame(case_id)
         return {'state': 'FRAME_REPLAY', 'live_control': False,
-                'scene_frame_id': frame.frame_id, 'sim_time_s': frame.sim_time_s,
-                'pose_world': frame.pose_world, 'camera': 'd435i_rgb_nominal',
+                'scene_frame_id': frame.frame_id, 'sim_time_s': frame.stamp_s,
+                'robot_state': frame.state.payload(), 'camera': 'd435i_rgb_nominal',
                 'observation_note': 'Frozen RGB-D observation; no live motion or arrival state is asserted.'}
 
     @app.get('/cases/{case_id}/scene')

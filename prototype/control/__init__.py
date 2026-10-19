@@ -1,5 +1,4 @@
-"""Robot geometry and depth constrained navigation control."""
+"""Sensor-state native Nav2 MPPI navigation control."""
+from .mppi import LocalControlBlocked, MPPIResult, Nav2MPPI
 
-from .mpc import CollisionAwareMPC, MPCInfeasible, MPCResult
-
-__all__ = ["CollisionAwareMPC", "MPCInfeasible", "MPCResult"]
+__all__ = ['Nav2MPPI', 'LocalControlBlocked', 'MPPIResult']

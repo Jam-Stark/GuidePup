@@ -1,0 +1,10 @@
+{
+  "time_steps": 24,
+  "model_dt": 0.1,
+  "batch_size": 512,
+  "iteration_count": 1,
+  "temperature": 0.3,
+  "gamma": 0.015,
+  "vx_std": 0.15,
+  "wz_std": 0.3
+}

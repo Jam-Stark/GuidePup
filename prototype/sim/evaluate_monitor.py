@@ -24,6 +24,14 @@ def read_json(path):
     return json.loads(path.read_text())
 
 
+def truth_index(path):
+    """Join evaluator events to the separately recorded plant state, never odom."""
+    with path.open() as stream:
+        rows = [json.loads(line) for line in stream]
+    indexed = {round(row['sim_time_s'], 8): row for row in rows}
+    return lambda stamp: indexed[round(stamp, 8)]
+
+
 def window_rows(path, start, finish, *, physics_steps=False):
     """Contact timestamps start their 5 ms interval; telemetry is a state sample."""
     with path.open() as stream:
@@ -231,7 +239,7 @@ def door_face_distance(pose, faces):
     return min(candidates, key=lambda item: item['base_horizontal_distance_m'])
 
 
-def stage_evidence(path, start, finish, footprint, doorway, crossing):
+def stage_evidence(path, start, finish, footprint, doorway, crossing, truth_at):
     if not path.exists():
         return {'available': False, 'source': str(path),
                 'limitation': 'No monitor journal: stage planning, omission and completion times are unknown.'}
@@ -252,6 +260,7 @@ def stage_evidence(path, start, finish, footprint, doorway, crossing):
             t = float(control['sim_time_s'])
             if not start - TIME_EPS <= t <= finish + TIME_EPS:
                 continue
+            control = {**control, **truth_at(t)}
             geometry = footprint_at(control['pose_world'], footprint, doorway)
             if first is None:
                 relative = 'no_full_body_crossing_observed_in_window'
@@ -276,7 +285,8 @@ def stage_evidence(path, start, finish, footprint, doorway, crossing):
                              pass_doorway_precedes_each_approach=all(any(i < j for i in exits) for j in approaches) if approaches else None)
                 plans.append(entry)
             elif kind == 'stage_completed':
-                entry.update(stage_index=data['stageIndex'], stage=data['stage'], model_reason=data['modelReason'],
+                entry.update(stage_index=data['stageIndex'], stage=data['stage'],
+                             completion_authority=data['completionAuthority'], completion_reason=data['reason'],
                              pass_doorway_advanced_before_full_body_exit=data['stage']['kind'] == 'pass_doorway' and not geometry['full_body_beyond_plane'])
                 advances.append(entry)
             else:
@@ -292,7 +302,7 @@ def stage_evidence(path, start, finish, footprint, doorway, crossing):
             'any_recorded_pass_doorway_advance_before_full_body_exit': any(
                 advance['pass_doorway_advanced_before_full_body_exit'] for advance in advances),
             'limits': ['No task_planned event means plan omission is unknown, not false.',
-                       'Stage geometry uses each event control.pose_world at control.sim_time_s; a completion label is not a physical PASS.',
+                       'Stage geometry joins each event timestamp to offline ground_truth.jsonl; online odometry is not physical truth.',
                        'Task completion without a prior pass_doorway completion event is reported separately from omission in a recorded plan.']}
 
 
@@ -318,10 +328,13 @@ def evaluate(episode):
     if Path(before['output']).resolve() != source:
         raise ValueError('Episode before/final refer to different simulator runs.')
     start, finish = float(before['sim_time_s']), float(final['sim_time_s'])
+    truth_at = truth_index(source / 'ground_truth.jsonl')
+    before, final = ({**control, **truth_at(control['sim_time_s'])} for control in (before, final))
     configuration = read_json(source / 'configuration.json')
-    footprint = configuration['mpc_footprint']
+    footprint = configuration['controller_footprint']
     geometry = scene_geometry(ROOT / 'prototype/sim/scenes/room_elevator.xml')
-    telemetry = [row for _, row in window_rows(source / 'telemetry.jsonl', start, finish)]
+    telemetry = [{**row, **truth_at(row['sim_time_s'])}
+                 for _, row in window_rows(source / 'telemetry.jsonl', start, finish)]
     rows = []
     for row in [before, *telemetry, final]:
         if rows and abs(row['sim_time_s'] - rows[-1]['sim_time_s']) < TIME_EPS:
@@ -333,10 +346,11 @@ def evaluate(episode):
     crossing = crossing_evidence(rows, footprint, geometry['doorway'])
     final_second = [row for row in rows if row['sim_time_s'] >= finish - 1.]
     final_speeds = [math.hypot(*row['actual_planar_twist'][:2]) for row in final_second]
-    mpc_rows = [row for _, row in window_rows(source / 'mpc.jsonl', start, finish)]
+    mpc_rows = [row for _, row in window_rows(source / 'local_controller.jsonl', start, finish)]
     mpc_counts = Counter(row['solver_status'] for row in mpc_rows)
     return {
         'episode': str(episode), 'raw_server_output': str(source), 'scene': summary['scene'],
+        'physical_state_source': str(source / 'ground_truth.jsonl'),
         'goal': summary['goal'], 'sim_time_window_s': [start, finish],
         'geometry': geometry, 'runtime_recorded_footprint': footprint,
         'contacts': contact_evidence(source, start, finish),
@@ -361,11 +375,11 @@ def evaluate(episode):
                                  'last_one_second_planar_speed_mean_m_s': float(np.mean(final_speeds)),
                                  'last_one_second_planar_speed_max_m_s': max(final_speeds),
                                  'definition': 'Actual velocities are reported directly; zero requested command is not treated as proof of stopping.'},
-        'mpc': {'status_counts': dict(mpc_counts),
-                'blocked_or_failed_calls': [{key: row[key] for key in ('sim_time_s', 'pose_world', 'solver_status', 'reason')}
-                                            for row in mpc_rows if row['solver_status'] != 'Solve_Succeeded']},
+        'local_controller': {'status_counts': dict(mpc_counts),
+                'blocked_or_failed_calls': [{key: row[key] for key in ('sim_time_s', 'pose_odom', 'solver_status', 'reason')}
+                                            for row in mpc_rows if row['solver_status'] != 'nav2_mppi_success']},
         'velocity_mismatch_navigating_nonzero_effective': velocity_mismatch(telemetry),
-        'monitor_stages': stage_evidence(episode / 'agent.jsonl', start, finish, footprint, geometry['doorway'], crossing),
+        'monitor_stages': stage_evidence(episode / 'agent.jsonl', start, finish, footprint, geometry['doorway'], crossing, truth_at),
         'reported_final_server_state': final['state'],
         'interpretation': 'Independent geometric, contact and kinematic observations only; no model/monitor semantic outcome is converted into physical PASS.',
     }

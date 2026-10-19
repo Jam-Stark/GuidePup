@@ -3,6 +3,10 @@
 本次交付代码仓库是 `https://github.com/Jam-Stark/GuidePup`，分支为 `codex/a2-lightnav-prototype`。
 迁移版本标记为 `20260915_215130_HKT`。当前修正与证据边界先读 [NAVIGATION_FRAMEWORK.md](NAVIGATION_FRAMEWORK.md)。
 
+2026-09-16 后续重建已将在线位姿/速度迁到传感器里程计；需安装新增的 `open3d-cpu==0.19.0`，状态合同见 [ROBOT_STATE.md](ROBOT_STATE.md)。旧在线 `pose_world`/真实速度 API 已删除，旧证据保留原快照读取。
+
+2026-09-16 新机器已完成环境恢复及 Owner 后续限定的 GPU0/Qwen p05 回合；最新实际结果和本机分发源见 [新机器运行报告](NAVIGATION_MIGRATION_20260916.md)。Gemini 暂缓，Qwen 新回合为 NEEDS_USER、真实完整成功0/1。
+
 Drive 目录：[20260915_215130_HKT](https://drive.google.com/drive/folders/1AA-_hWHKX6erT_-Iwxt4Iqh_ZUsMz2hr)。
 目录中的 `worker_delivery__BUNDLE_INDEX.md` 和 `worker_delivery__BUNDLE_MANIFEST.json` 是附件清单；
 实际上传状态以交付回执为准。

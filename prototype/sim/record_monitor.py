@@ -1,4 +1,4 @@
-"""Record the fixed resident-monitor force/pause/question/resume trial."""
+"""Record a resident-monitor trial, with the fixed interaction or without intervention."""
 from __future__ import annotations
 
 import argparse
@@ -13,7 +13,7 @@ import aiohttp
 from record_task import snapshot_sources, model_environment
 
 ROOT = Path(__file__).resolve().parents[2]
-SIM = 'http://127.0.0.1:8766'
+SIM = os.environ.get('SIM_URL', 'http://127.0.0.1:8766')
 MONITOR = 'http://127.0.0.1:8770'
 SCENE = 'room_elevator'
 GOAL = '出门走到电梯门口'
@@ -31,6 +31,7 @@ def decision_requests(path):
 
 
 async def run(args):
+    scene, goal = args.scene, args.goal
     output = args.output.resolve()
     output.mkdir(parents=True)
     snapshot_sources(output)
@@ -39,15 +40,16 @@ async def run(args):
         environment.pop(key, None)
     environment.update(NO_PROXY='*', no_proxy='*')
     environment.update(model_environment(args.model))
-    with (output / 'setup.log').open('wb') as setup_log:
-        setup = await asyncio.create_subprocess_exec(
-            'bash', str(ROOT / 'prototype/run.sh'), 'reset', '--scene', SCENE,
-            '--record-contacts', *(['--record-navigation-inputs'] if args.record_navigation_inputs else []),
-            *([] if args.spawn_pose is None else ['--spawn-pose', *map(str, args.spawn_pose)]),
-            cwd=ROOT, env=environment,
-            stdout=setup_log, stderr=asyncio.subprocess.STDOUT)
-        if await setup.wait() != 0:
-            raise RuntimeError('Simulator setup failed; task was not started. See setup.log.')
+    if not args.connect_existing:
+        with (output / 'setup.log').open('wb') as setup_log:
+            setup = await asyncio.create_subprocess_exec(
+                'bash', str(ROOT / 'prototype/run.sh'), 'reset', '--scene', scene,
+                '--record-contacts', *(['--record-navigation-inputs'] if args.record_navigation_inputs else []),
+                *([] if args.spawn_pose is None else ['--spawn-pose', *map(str, args.spawn_pose)]),
+                cwd=ROOT, env=environment,
+                stdout=setup_log, stderr=asyncio.subprocess.STDOUT)
+            if await setup.wait() != 0:
+                raise RuntimeError('Simulator setup failed; task was not started. See setup.log.')
 
     async with aiohttp.ClientSession(trust_env=False) as client:
         async def request(base, path, body=None, timeout_s=15):
@@ -75,7 +77,7 @@ async def run(args):
         process = await asyncio.create_subprocess_exec(
             *pi_command, 'monitor', '--port', '8770',
             '--log', str(output / 'agent.jsonl'), '--db', str(output / 'tasks.sqlite'),
-            '--timeout-s', str(args.timeout_s), '--max-recoveries', str(args.max_recoveries),
+            '--max-recoveries', str(args.max_recoveries),
             '--decision-timeout-s', str(args.decision_timeout_s), cwd=ROOT, env=environment,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
 
@@ -93,9 +95,8 @@ async def run(args):
             save_json(output / 'interactionlog.json', interactions)
 
         task_id = None
-        task_started = None
         monitor_state = None
-        phase = 'WAITING_FOR_MOTION'
+        phase = 'WAITING_FOR_MOTION' if args.interaction == 'force_resume' else 'NO_INTERACTION'
         force_until = None
         brake_seen = False
         paused_pose = None
@@ -112,8 +113,8 @@ async def run(args):
 
         def require_pause(status, snapshot):
             nonlocal pause_max_displacement_m
-            displacement = math.hypot(status['pose_world'][0] - paused_pose[0],
-                                      status['pose_world'][1] - paused_pose[1])
+            displacement = math.hypot(status['robot_state']['pose_odom'][0] - paused_pose[0],
+                                      status['robot_state']['pose_odom'][1] - paused_pose[1])
             pause_max_displacement_m = max(pause_max_displacement_m, displacement)
             if status['state'] != 'HUMAN_PAUSED' or snapshot['task']['currentStage'] != 0:
                 raise RuntimeError('Human pause or original stage changed before explicit resume.')
@@ -144,10 +145,9 @@ async def run(args):
                         continue
 
                     if task_id is None:
-                        accepted = await request(MONITOR, '/task', {'goal': GOAL})
+                        accepted = await request(MONITOR, '/task', {'goal': goal})
                         task_id = accepted['taskId']
-                        task_started = time.monotonic()
-                        event('task_submitted', goal=GOAL, response=accepted, status=status)
+                        event('task_submitted', goal=goal, response=accepted, status=status)
                     else:
                         task = monitor_state['task']
                         if task['status'] in TERMINAL:
@@ -157,7 +157,7 @@ async def run(args):
                                 terminal_request_count = decision_requests(output / 'agent.jsonl')
                                 event('monitor_terminal', monitor=monitor_state, status=status,
                                       decision_requests=terminal_request_count)
-                                if phase != 'RESUMED':
+                                if args.interaction == 'force_resume' and phase != 'RESUMED':
                                     recorder_error = f'Task terminated before the fixed interaction finished (phase={phase}).'
                                     event('interaction_incomplete', error=recorder_error)
                             if time.monotonic() - terminal_started >= 3:
@@ -172,11 +172,9 @@ async def run(args):
                                 }
                                 event('resident_after_terminal', **idle_evidence)
                                 break
-                        elif time.monotonic() - task_started >= args.timeout_s:
-                            raise TimeoutError('Recorder wall-clock episode limit reached before a monitor terminal result.')
                         elif phase == 'WAITING_FOR_MOTION':
-                            travelled = math.hypot(status['pose_world'][0] - before['pose_world'][0],
-                                                   status['pose_world'][1] - before['pose_world'][1])
+                            travelled = math.hypot(status['robot_state']['pose_odom'][0] - before['robot_state']['pose_odom'][0],
+                                                   status['robot_state']['pose_odom'][1] - before['robot_state']['pose_odom'][1])
                             if task['currentStage'] > 0:
                                 raise RuntimeError('Stage 0 ended without reaching the fixed force trigger.')
                             if (task['currentStage'] == 0 and status['state'] == 'NAVIGATING'
@@ -191,14 +189,16 @@ async def run(args):
                             if status['state'] == 'HUMAN_PAUSED' and status['reason'] == 'force_brake':
                                 if not brake_seen:
                                     brake_seen = True
-                                    paused_pose = status['pose_world']
+                                    paused_pose = status['robot_state']['pose_odom']
                                     paused_at_sim_time = status['sim_time_s']
                                     event('force_brake_observed', status=status, monitor=monitor_state)
                                 require_pause(status, monitor_state)
                             elif brake_seen:
                                 raise RuntimeError('Force brake was released before the explicit human resume.')
-                            cleared = (status['sim_time_s'] >= force_until
-                                       and all(value == 0 for value in status['force_applied_local_N']))
+                            # This recorder owns the force schedule. Wait through
+                            # the next 50 Hz control tick; actual removal is also
+                            # retained in the separate offline ground-truth log.
+                            cleared = status['sim_time_s'] >= force_until + .02
                             if cleared:
                                 if not brake_seen:
                                     raise RuntimeError('The real force ended without a force-brake latch; no artificial pause was applied.')
@@ -246,20 +246,21 @@ async def run(args):
         # The evaluator may use this archive; it was not supplied to Qwen.
         observation = await request(SIM, '/scene')
         save_json(output / 'terminal_frame.json',
-                  {key: observation[key] for key in ('frame_id', 'sim_time_s', 'pose_world')})
+                  {key: observation[key] for key in ('frame_id', 'stamp_s', 'robot_state')})
         outcome = terminal_state['task']['status'] if terminal_state else None
         code = 1 if recorder_error or outcome == 'ERROR' else 0 if outcome == 'COMPLETED' else 2
         summary = {
-            'scene': SCENE, 'goal': GOAL, 'exit_code': code,
+            'scene': scene, 'goal': goal, 'exit_code': code,
             'model_profile': args.model,
             'requested_spawn_pose_xy_yaw_deg': args.spawn_pose,
             'record_navigation_inputs': args.record_navigation_inputs,
             'elapsed_wall_s': time.monotonic() - started,
-            'timeout_s': args.timeout_s, 'max_recoveries': args.max_recoveries,
+            'timeout_s': None, 'max_recoveries': args.max_recoveries,
             'decision_timeout_s': args.decision_timeout_s,
             'before': before, 'final': final, 'task_id': task_id,
             'monitor_outcome': outcome, 'monitor_process_exit_code': process.returncode,
             'interaction_phase': phase, 'force_brake_observed': brake_seen,
+            'interaction_protocol': args.interaction,
             'pause_max_displacement_m': pause_max_displacement_m,
             'resident_idle_evidence': idle_evidence, 'recorder_error': recorder_error,
         }
@@ -272,10 +273,14 @@ async def run(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', required=True, type=Path)
+    parser.add_argument('--scene', default=SCENE)
+    parser.add_argument('--goal', default=GOAL)
+    parser.add_argument('--connect-existing', action='store_true', help='Record an already initialized simulator backend.')
     parser.add_argument('--spawn-pose', type=float, nargs=3, metavar=('X', 'Y', 'YAW_DEG'))
     parser.add_argument('--record-navigation-inputs', action='store_true')
-    parser.add_argument('--timeout-s', default=360, type=int)
     parser.add_argument('--decision-timeout-s', default=30, type=int)
     parser.add_argument('--max-recoveries', default=3, type=int)
     parser.add_argument('--model', choices=['qwen', 'gemini'], default='qwen')
+    parser.add_argument('--interaction', choices=['force_resume', 'none'], default='force_resume',
+                        help='none records the same task without injected force, question, or manual pause/resume.')
     raise SystemExit(asyncio.run(run(parser.parse_args())))

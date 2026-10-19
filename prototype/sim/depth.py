@@ -10,44 +10,19 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 
-class DepthFrame:
-    """An owned snapshot with depth expressed in its rectified RGB optical frame.
+class DepthImage:
+    """Calibrated native optical-axis depth at one estimated robot state."""
 
-    Optical axes are right/down/forward; base axes are forward/left/up.
-    ``camera_to_base`` maps optical 3-D points into the robot base frame.
-    The caller supplies synchronized images/calibration and caches this object
-    by frame_id. This module's current source is ideal MuJoCo RGB-D rendering.
-    """
-
-    columns = 6
-    rows = 3
-    layer_width_m = 0.5
-
-    def __init__(
-        self,
-        frame_id: int | str,
-        sim_time_s: float,
-        pose_world: Sequence[float],
-        rgb: np.ndarray,
-        depth_z_m: np.ndarray,
-        intrinsics: Mapping[str, float],
-        camera_to_base: np.ndarray,
-        world_from_base: np.ndarray,
-        valid_range_m: tuple[float, float] = (0.2, 8.0),
-    ):
-        self.frame_id = frame_id
-        self.sim_time_s = float(sim_time_s)
-        self.pose_world = [float(value) for value in pose_world]
-        self.rgb = np.asarray(rgb).copy()
+    def __init__(self, frame_id, state, depth_z_m, intrinsics, camera_to_base,
+                 valid_range_m=(0.2, 8.0)):
+        self.frame_id, self.state = frame_id, state
+        self.stamp_s = state.stamp_s
+        self.pose_odom = state.pose_odom.tolist()
         self.depth_z_m = np.asarray(depth_z_m, dtype=np.float32).copy()
-        self.camera_to_base = np.asarray(camera_to_base, dtype=np.float32).copy()
-        self.world_from_base = np.asarray(world_from_base, dtype=np.float64).copy()
+        self.height, self.width = self.depth_z_m.shape
+        self.camera_to_base = np.asarray(camera_to_base, dtype=np.float64).copy()
+        self.odom_from_base = state.odom_from_base.copy()
         self.valid_range_m = tuple(float(value) for value in valid_range_m)
-        if self.rgb.ndim != 3 or self.rgb.shape[2] != 3 or self.rgb.dtype != np.uint8:
-            raise ValueError('rgb must be uint8 [height, width, 3]')
-        self.height, self.width = self.rgb.shape[:2]
-        if self.depth_z_m.shape != (self.height, self.width):
-            raise ValueError('RGB and optical-axis depth must share the same pixel grid')
         if self.camera_to_base.shape != (4, 4):
             raise ValueError('camera_to_base must be a 4x4 optical-to-base transform')
         self.intrinsics = {key: float(intrinsics[key]) for key in ('fx', 'fy', 'cx', 'cy')}
@@ -55,27 +30,37 @@ class DepthFrame:
         near, far = self.valid_range_m
         if fx <= 0 or fy <= 0 or not 0 < near < far:
             raise ValueError('focal lengths and ordered depth limits must be positive')
-
-        # Missing and clipped pixels remain unknown, never points at the origin
-        # or at the renderer's far plane. Pixel (0, 0) is the top-left center.
         self.valid_mask = np.isfinite(self.depth_z_m) & (self.depth_z_m > near) & (self.depth_z_m < far)
         v, u = np.nonzero(self.valid_mask)
         z = self.depth_z_m[v, u]
-        optical = np.column_stack(((u - cx) * z / fx, (v - cy) * z / fy, z)).astype(np.float32)
+        optical = np.column_stack(((u-cx)*z/fx, (v-cy)*z/fy, z)).astype(np.float32)
         self._points_base = optical @ self.camera_to_base[:3, :3].T + self.camera_to_base[:3, 3]
         self._range_m = np.full((self.height, self.width), np.nan, dtype=np.float32)
         self._range_m[v, u] = np.hypot(self._points_base[:, 0], self._points_base[:, 1])
 
-    def points_base(self) -> np.ndarray:
-        """Return all valid Nx3 points in meters, without sampling or inflation.
-
-        These include visible floor and robot surfaces. The controller adapter
-        owns ground/self filtering, capture-pose alignment and occupancy memory.
-        Missing pixels supply no evidence of free space.
-        """
+    def points_base(self):
         return self._points_base.copy()
 
-    def world_point_from_pixel(self, pixel) -> list[float] | None:
+
+class DepthFrame(DepthImage):
+    """RGB and native depth projected into the calibrated RGB optical grid.
+
+    geometry preserves the full native-depth image for mapping, including pixels
+    outside RGB. Both snapshots share the exact same estimated RobotState.
+    """
+    columns = 6
+    rows = 3
+    layer_width_m = 0.5
+
+    def __init__(self, frame_id, state, rgb, depth_z_m, intrinsics, camera_to_base,
+                 valid_range_m=(0.2, 8.0), *, geometry):
+        super().__init__(frame_id, state, depth_z_m, intrinsics, camera_to_base, valid_range_m)
+        self.rgb = np.asarray(rgb).copy()
+        self.geometry = geometry
+        if self.rgb.dtype != np.uint8 or self.rgb.shape != (self.height, self.width, 3):
+            raise ValueError('RGB must be uint8 and share the projected-depth pixel grid')
+
+    def odom_point_from_pixel(self, pixel) -> list[float] | None:
         """Measure one indicated pixel; an unavailable depth remains unknown."""
         u, v = (int(round(value)) for value in pixel)
         if not (0 <= u < self.width and 0 <= v < self.height) or not self.valid_mask[v, u]:
@@ -83,11 +68,11 @@ class DepthFrame:
         z = float(self.depth_z_m[v, u])
         k = self.intrinsics
         optical = np.array([(u-k['cx'])*z/k['fx'], (v-k['cy'])*z/k['fy'], z, 1.])
-        return (self.world_from_base @ self.camera_to_base @ optical)[:3].tolist()
+        return (self.odom_from_base @ self.camera_to_base @ optical)[:3].tolist()
 
-    def project_world_point(self, point) -> dict:
+    def project_odom_point(self, point) -> dict:
         """Reproject a static observed point into this frame; no object identity claim."""
-        optical = np.linalg.solve(self.world_from_base @ self.camera_to_base, np.r_[point, 1.])
+        optical = np.linalg.solve(self.odom_from_base @ self.camera_to_base, np.r_[point, 1.])
         if optical[2] <= 0:
             return {'in_view': False, 'point_1000': None}
         k = self.intrinsics
@@ -100,18 +85,17 @@ class DepthFrame:
     def _metadata(self) -> dict:
         return {
             'frame_id': self.frame_id,
-            'sim_time_s': self.sim_time_s,
-            'pose_world': self.pose_world,
+            'stamp_s': self.stamp_s,
+            'robot_state': self.state.payload(),
             'width': self.width,
             'height': self.height,
-            'source': 'synthetic_mujoco_rgbd',
-            'synthetic': True,
+            'source': 'calibrated_native_depth_projected_to_rgb_with_sensor_odometry',
             'distance_definition': 'base_planar_range_m = hypot(x_base,y_base)',
             'valid_optical_depth_range_m': list(self.valid_range_m),
             'layer_width_m': self.layer_width_m,
             'layer_note': 'D IDs identify fixed distance bands, not objects; the layer image shows their actual pixel membership',
             'statistics_note': 'p10/p90 are pixel-distance percentiles (central 80%); not a confidence interval or sensor-error bound',
-            'support_bounds_definition': 'Axis-aligned world XYZ minima/maxima of actual valid depth pixels in each layer; not full object extent or entity identity.',
+            'support_bounds_definition': 'Axis-aligned odom XYZ minima/maxima of actual valid depth pixels in each layer; not full object extent or entity identity.',
             'bbox_convention': '[x0,y0,x1,y1), original image pixels',
             'unknown_meaning': 'no valid depth measurement; not evidence of free space',
         }
@@ -155,14 +139,14 @@ class DepthFrame:
             depths = self.depth_z_m[ys, xs].astype(np.float64)
             optical_points = np.column_stack(((xs-k['cx'])*depths/k['fx'],
                                               (ys-k['cy'])*depths/k['fy'], depths))
-            camera_to_world = self.world_from_base @ self.camera_to_base
-            points = optical_points @ camera_to_world[:3, :3].T + camera_to_world[:3, 3]
+            camera_to_odom = self.odom_from_base @ self.camera_to_base
+            points = optical_points @ camera_to_odom[:3, :3].T + camera_to_odom[:3, 3]
             layer = {
                 'layer_id': f'D{index}',
                 'range_m': [low, low + self.layer_width_m],
                 'median_m': round(float(np.median(values)), 3),
                 'fraction_of_valid': round(float(values.size / valid_count), 4),
-                'support_world_bounds_m': [points.min(axis=0).tolist(), points.max(axis=0).tolist()],
+                'support_odom_bounds_m': [points.min(axis=0).tolist(), points.max(axis=0).tolist()],
             }
             if detailed:
                 p10, p90 = np.quantile(values, [0.1, 0.9])
@@ -172,18 +156,18 @@ class DepthFrame:
                 z = float(self.depth_z_m[sy, sx])
                 optical = np.array([(sx-k['cx'])*z/k['fx'], (sy-k['cy'])*z/k['fy'], z, 1.])
                 base_point = self.camera_to_base @ optical
-                world_point = self.world_from_base @ base_point
+                odom_point = self.odom_from_base @ base_point
                 surface = None
                 if values.size >= 3:
                     centroid = points.mean(axis=0)
                     centered = points - centroid
                     eigenvalues, eigenvectors = np.linalg.eigh(centered.T @ centered / len(points))
                     normal = eigenvectors[:, 0]
-                    if np.dot(normal, camera_to_world[:3, 3] - centroid) < 0:
+                    if np.dot(normal, camera_to_odom[:3, 3] - centroid) < 0:
                         normal = -normal
                     surface = {
-                        'centroid_world_m': centroid.round(5).tolist(),
-                        'normal_world': normal.round(6).tolist(),
+                        'centroid_odom_m': centroid.round(5).tolist(),
+                        'normal_odom': normal.round(6).tolist(),
                         'rms_m': round(float(np.sqrt(np.mean((centered @ normal) ** 2))), 5),
                         'point_count': len(points),
                         'in_plane_std_m': np.sqrt(eigenvalues[1:]).round(5).tolist(),
@@ -194,7 +178,7 @@ class DepthFrame:
                              pixel_bbox_px=[int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1],
                              sample_pixel_px=[sx, sy],
                              sample_base_point_m=base_point[:3].round(5).tolist(),
-                             sample_world_point_m=world_point[:3].round(5).tolist(),
+                             sample_odom_point_m=odom_point[:3].round(5).tolist(),
                              surface=surface)
             layers.append(layer)
         return {
@@ -239,8 +223,8 @@ class DepthFrame:
 
     def scene_payload(self, camera: Mapping) -> dict:
         return {
-            'frame_id': self.frame_id, 'sim_time_s': self.sim_time_s,
-            'pose_world': self.pose_world, 'camera': dict(camera), 'depth': self.overview(),
+            'frame_id': self.frame_id, 'stamp_s': self.stamp_s,
+            'robot_state': self.state.payload(), 'camera': dict(camera), 'depth': self.overview(),
             'images': [
                 self._packet('rgb', f'Original RGB, frame {self.frame_id}, {self.width}x{self.height}; choose object pixels on this image.', self.rgb_jpeg()),
                 self._packet('grid', 'Same RGB with numbered grid. A cell can contain several objects and background; measurement accepts any pixel rectangle.', self.annotated_jpeg()),

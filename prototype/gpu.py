@@ -7,11 +7,17 @@ import subprocess
 import uuid
 
 
-def configure_gpu():
+def configure_cuda():
     physical_index = int(os.environ.get('LIGHTNAV_GPU', '0'))
     target = subprocess.check_output(
         ['nvidia-smi', '-i', str(physical_index), '--query-gpu=uuid', '--format=csv,noheader'], text=True).strip()
     os.environ['CUDA_VISIBLE_DEVICES'] = target
+    return {'physical_gpu_index': physical_index, 'device_uuid': target}
+
+
+def configure_gpu():
+    binding = configure_cuda()
+    physical_index, target = binding['physical_gpu_index'], binding['device_uuid']
     os.environ['MUJOCO_GL'] = 'egl'
     os.environ['__EGL_VENDOR_LIBRARY_FILENAMES'] = '/usr/share/glvnd/egl_vendor.d/10_nvidia.json'
     egl = ctypes.CDLL('libEGL.so.1')

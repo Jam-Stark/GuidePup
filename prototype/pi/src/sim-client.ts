@@ -1,5 +1,16 @@
 import type { ImageContent } from "@earendil-works/pi-ai";
 
+export interface RobotState {
+  stamp_s: number; epoch: string; frame_id: "odom"; child_frame_id: "base_link";
+  odom_from_base: number[][]; pose_odom: number[]; twist_base: number[]; planar_twist: number[];
+  tracking: string; source: string; quality: Record<string, unknown>;
+}
+export interface SpatialEvidence {
+  epoch: string; stamp_s: number; frame_id: "odom"; map_stamp_s: number;
+  point_states: ("free" | "occupied" | "unknown")[];
+  footprint_states: ("free" | "occupied" | "unknown")[];
+}
+
 export interface SimStatus {
   event_id: number;
   generation: number;
@@ -8,8 +19,7 @@ export interface SimStatus {
   state: string;
   instruction: string;
   reason: string;
-  pose_world: number[];
-  actual_velocity_body: number[];
+  robot_state: RobotState;
   effective_cmd: number[];
   [key: string]: unknown;
 }
@@ -22,31 +32,34 @@ export interface ObservationImage {
 
 export interface MotionSegment {
   control_task_id: string;
-  start_sim_time_s: number;
-  end_sim_time_s: number;
-  source: "simulator_pose";
-  actual: {
-    samples: { sim_time_s: number; pose_world: number[] }[];
+  start_stamp_s: number;
+  end_stamp_s: number;
+  source: string;
+  epoch: string;
+  estimated: {
+    samples: { stamp_s: number; pose_odom: number[] }[];
     sample_count: number;
     path_length_m: number;
     net_displacement_m: number;
     yaw_change_rad: number;
   };
   plans: {
-    sequence: number; capture_time_s: number; capture_pose_world: number[];
-    received_sim_time_s: number; waypoints_world: number[][];
+    sequence: number; capture_time_s: number; capture_pose_odom: number[];
+    received_stamp_s: number; waypoints_odom: number[][];
     visible: boolean | null; stop: boolean; pointing: Record<string, unknown> | null;
   }[];
   plan_count: number;
-  events: { sim_time_s: number; state: string; reason: string }[];
+  events: { stamp_s: number; state: string; reason: string }[];
+  control_execution: { control_ticks: number; nonzero_ticks: number; first_stamp_s: number | null;
+    last_stamp_s: number | null; last_effective_cmd: number[]; command_min: number[]; command_max: number[]; meaning: string;
+    [key: string]: unknown };
   log_paths: { telemetry: string; lightnav: string };
 }
 
 export interface SceneFrame {
   images: ObservationImage[];
   frame_id: string;
-  sim_time_s: number;
-  pose_world: number[];
+  robot_state: RobotState;
   depth: Record<string, unknown>;
   semantic_depth: {
     frame_id: string;
@@ -99,6 +112,16 @@ export class SimClient {
     return (await this.request("/motion", undefined, signal)).json();
   }
 
+  async spatialEvidence(epoch: string, stampS: number, points: number[][], poses: number[][],
+    signal?: AbortSignal): Promise<SpatialEvidence> {
+    const evidence: SpatialEvidence = await (await this.request("/spatial_evidence", { epoch, stamp_s: stampS,
+      points_odom: points, footprint_poses_odom: poses }, signal)).json();
+    if (evidence.point_states.length !== points.length || evidence.footprint_states.length !== poses.length) {
+      throw new Error("Spatial evidence does not cover the requested geometry");
+    }
+    return evidence;
+  }
+
   async navigate(instruction: string, signal?: AbortSignal): Promise<unknown> {
     return (await this.request("/navigate", { instruction }, signal)).json();
   }
@@ -118,12 +141,12 @@ export class SimClient {
   async action(monitorId: string, generation: number, action: "navigate" | "pause" | "invalidate" | "complete",
     instruction?: string, reason?: string, signal?: AbortSignal, navigationScope?: string,
     movement?: { maneuver: string; turnDegrees?: number; advanceMeters?: number; semanticInstruction?: string;
-      goalPointWorld?: number[]; goalHeadingRad?: number; positionToleranceM?: number; headingToleranceDeg?: number }): Promise<SimStatus> {
+      goalPointOdom?: number[]; goalHeadingRad?: number; positionToleranceM?: number; headingToleranceDeg?: number }): Promise<SimStatus> {
     return (await this.request("/monitor/action", { monitor_id: monitorId,
       expected_generation: generation, action, instruction, reason, navigation_scope: navigationScope,
       maneuver: movement?.maneuver, turn_degrees: movement?.turnDegrees, advance_m: movement?.advanceMeters,
       semantic_instruction: movement?.semanticInstruction,
-      goal_point_world: movement?.goalPointWorld, goal_heading_rad: movement?.goalHeadingRad,
+      goal_point_odom: movement?.goalPointOdom, goal_heading_rad: movement?.goalHeadingRad,
       position_tolerance_m: movement?.positionToleranceM, heading_tolerance_deg: movement?.headingToleranceDeg }, signal)).json();
   }
 

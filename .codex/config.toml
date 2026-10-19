@@ -8,7 +8,6 @@ background_terminal_max_timeout = 86400000
 [features]
 context_management = { experimental_mode = true }
 token_budget.enabled = true
-token_budget.use_history_notes_extension = true
 
 [agents]
 enabled = true

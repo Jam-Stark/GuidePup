@@ -91,8 +91,8 @@ class SemanticDepthFrame:
                   'status': 'measured' if count else 'unknown',
                   'optical_depth_m': None, 'base_planar_range_m': None,
                   'sample_pixel_px': None, 'sample_base_point_m': None,
-                  'sample_world_point_m': None, 'surface_plane_world': None,
-                  'support_world_bounds_m': None}
+                  'sample_odom_point_m': None, 'surface_plane_odom': None,
+                  'support_odom_bounds_m': None}
         if not count:
             return result
         z = frame.depth_z_m[ys, xs].astype(np.float64)
@@ -100,8 +100,8 @@ class SemanticDepthFrame:
         optical = np.column_stack(((xs - k['cx']) * z / k['fx'],
                                    (ys - k['cy']) * z / k['fy'], z))
         base = optical @ frame.camera_to_base[:3, :3].T + frame.camera_to_base[:3, 3]
-        world = base @ frame.world_from_base[:3, :3].T + frame.world_from_base[:3, 3]
-        result['support_world_bounds_m'] = [world.min(axis=0).tolist(), world.max(axis=0).tolist()]
+        odom = base @ frame.odom_from_base[:3, :3].T + frame.odom_from_base[:3, 3]
+        result['support_odom_bounds_m'] = [odom.min(axis=0).tolist(), odom.max(axis=0).tolist()]
         ranges = np.hypot(base[:, 0], base[:, 1])
         for key, values in [('optical_depth_m', z), ('base_planar_range_m', ranges)]:
             result[key] = dict(zip(('p10_m', 'median_m', 'p90_m'),
@@ -110,17 +110,17 @@ class SemanticDepthFrame:
         sample = np.argmin((xs - xs.mean()) ** 2 + (ys - ys.mean()) ** 2)
         result.update(sample_pixel_px=[int(xs[sample]), int(ys[sample])],
                       sample_base_point_m=base[sample].tolist(),
-                      sample_world_point_m=world[sample].tolist())
+                      sample_odom_point_m=odom[sample].tolist())
         if count >= 3:
-            centroid = world.mean(axis=0)
-            centered = world - centroid
+            centroid = odom.mean(axis=0)
+            centered = odom - centroid
             _, singular, vh = np.linalg.svd(centered, full_matrices=False)
             normal = vh[-1]
-            camera_world = (frame.world_from_base @ frame.camera_to_base)[:3, 3]
-            if np.dot(normal, camera_world - centroid) < 0:
+            camera_odom = (frame.odom_from_base @ frame.camera_to_base)[:3, 3]
+            if np.dot(normal, camera_odom - centroid) < 0:
                 normal = -normal
-            result['surface_plane_world'] = {
-                'centroid_world_m': centroid.tolist(), 'normal_world': normal.tolist(),
+            result['surface_plane_odom'] = {
+                'centroid_odom_m': centroid.tolist(), 'normal_odom': normal.tolist(),
                 'rms_m': float(np.sqrt(np.mean((centered @ normal) ** 2))),
                 'point_count': count, 'in_plane_std_m': (singular[:2][::-1] / np.sqrt(count)).tolist(),
                 'definition': 'Least-squares fit of all valid mask pixels; mixed surfaces and nonplanarity remain in RMS. Not proof of object identity or a doorway plane.',
@@ -128,13 +128,13 @@ class SemanticDepthFrame:
         return result
 
     def _metadata(self):
-        return {'frame_id': self.frame.frame_id, 'sim_time_s': self.frame.sim_time_s,
-                'pose_world': self.frame.pose_world, **self.model_info,
+        return {'frame_id': self.frame.frame_id, 'stamp_s': self.frame.stamp_s,
+                'robot_state': self.frame.state.payload(), **self.model_info,
                 'width': self.frame.width, 'height': self.frame.height,
                 'id_scope': 'frame-local mask ID, not entity ID or tracked object identity',
                 'bbox_convention': '[x0,y0,x1,y1), original RGB pixels; detector_bbox_px is model xyxy',
                 'distance_definition': 'base_planar_range_m = hypot(x_base,y_base)',
-                'support_bounds_definition': 'Axis-aligned world XYZ minima/maxima of actual valid depth member pixels, not full physical object extent.',
+                'support_bounds_definition': 'Axis-aligned odom XYZ minima/maxima of actual valid depth member pixels, not full physical object extent.',
                 'mask_relations_definition': 'Unordered mask pairs. Pixel overlap uses complete masks. Representative XY distance uses measured sample points; support XY gap is the minimum Euclidean separation of observed axis-aligned XY bounds. Missing depth yields null distances. Overlap or coplanarity does not prove entity identity or semantic relationships.',
                 'semantic_note': 'YOLOE vocabulary is task configuration. Labels and scores are predictions, not entity identities or task decisions. Use the user goal and original RGB to judge identity and relationships; exact mask membership and depth provide measured geometry.',
                 'unknown_meaning': 'No valid depth, not free space. No detections is an actual empty list.'}
@@ -152,12 +152,12 @@ class SemanticDepthFrame:
             union = a['pixel_count'] + b['pixel_count'] - intersection
             representative_distance = None
             support_gap = None
-            if a['sample_world_point_m'] is not None and b['sample_world_point_m'] is not None:
+            if a['sample_odom_point_m'] is not None and b['sample_odom_point_m'] is not None:
                 representative_distance = float(np.linalg.norm(
-                    np.asarray(a['sample_world_point_m'][:2]) - b['sample_world_point_m'][:2]))
-            if a['support_world_bounds_m'] is not None and b['support_world_bounds_m'] is not None:
-                a_bounds = np.asarray(a['support_world_bounds_m'])[:, :2]
-                b_bounds = np.asarray(b['support_world_bounds_m'])[:, :2]
+                    np.asarray(a['sample_odom_point_m'][:2]) - b['sample_odom_point_m'][:2]))
+            if a['support_odom_bounds_m'] is not None and b['support_odom_bounds_m'] is not None:
+                a_bounds = np.asarray(a['support_odom_bounds_m'])[:, :2]
+                b_bounds = np.asarray(b['support_odom_bounds_m'])[:, :2]
                 # Each axis contributes zero for overlapping intervals; otherwise their actual gap.
                 axis_gaps = np.maximum(np.maximum(a_bounds[0] - b_bounds[1],
                                                  b_bounds[0] - a_bounds[1]), 0.0)
@@ -179,9 +179,9 @@ class SemanticDepthFrame:
         mask = self._masks[instance_id]
         instance = next(item for item in self.instances if item['id'] == instance_id)
         frame = self.frame
-        selected = DepthFrame(frame.frame_id, frame.sim_time_s, frame.pose_world, frame.rgb,
+        selected = DepthFrame(frame.frame_id, frame.state, frame.rgb,
                               np.where(mask, frame.depth_z_m, np.nan), frame.intrinsics,
-                              frame.camera_to_base, frame.world_from_base, frame.valid_range_m)
+                              frame.camera_to_base, frame.valid_range_m, geometry=frame.geometry)
         measurement = selected.measure_region(instance['bbox_px'])
         measurement.update(instance_id=instance_id, label=instance['label'], confidence=instance['confidence'],
                            pixel_count=instance['pixel_count'], valid_ratio=instance['valid_depth_fraction'],

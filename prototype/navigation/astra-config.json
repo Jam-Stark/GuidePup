@@ -1,0 +1,19 @@
+{
+  "camera_profile": "a2_head_isaaclab",
+  "sensor_mode": "rgb",
+  "planner": {
+    "backend": "codex_exec",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "medium",
+    "service_tier": "default",
+    "codex_proxy": "http://127.0.0.1:7890"
+  },
+  "controller_config": "prototype/control/rgb_tracking.json",
+  "lightnav_url": "ws://127.0.0.1:8050",
+  "navigation_input_period_s": 0.25,
+  "navigation_response_timeout_s": 60,
+  "reference_max_age_s": 2.0,
+  "stall_window_s": 10.0,
+  "completion": "planner_visual_approximate_arrival_then_sensor_estimated_stop",
+  "task_time_budget_s": null
+}

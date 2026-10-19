@@ -1,0 +1,58 @@
+{
+  "schema": {
+    "type": "object",
+    "properties": {
+      "action": {"type": "string", "enum": ["navigate", "confirm_navigation", "turn_observe", "advance_observe", "hold_observe", "complete", "needs_user"]},
+      "instruction": {"type": ["string", "null"]},
+      "target": {
+        "type": ["object", "null"],
+        "description": "Required for navigate only: intended visible object in current_observation's original RGB, never a contact sheet or an old frame. All other actions use null.",
+        "properties": {
+          "frame_id": {"type": "string", "minLength": 1},
+          "bbox_xyxy": {
+            "type": "array",
+            "items": {"type": "number", "minimum": 0, "maximum": 1},
+            "minItems": 4,
+            "maxItems": 4,
+            "description": "[x0,y0,x1,y1] normalized to original RGB width/height, with x0 < x1 and y0 < y1."
+          }
+        },
+        "required": ["frame_id", "bbox_xyxy"],
+        "additionalProperties": false
+      },
+      "angle_deg": {"type": ["number", "null"]},
+      "speed_m_s": {"type": ["number", "null"]},
+      "duration_s": {"type": ["number", "null"]},
+      "reason": {"type": "string"},
+      "evidence": {"type": "string"},
+      "uncertainty": {"type": "string"}
+    },
+    "required": ["action", "instruction", "target", "angle_deg", "speed_m_s", "duration_s", "reason", "evidence", "uncertainty"],
+    "additionalProperties": false
+  },
+  "actions": {
+    "navigate": "Propose the complete English instruction and a target with current_observation.frame_id and normalized bbox_xyxy in its original RGB. The runtime sends that exact image to the navigation model while standing, then requests NAVIGATION_TARGET_REVIEW before MPPI execution. All motion parameters must be null. This can request recovery from an automatic external-force stop, but execution waits for confirmation and cannot release a human brake.",
+    "confirm_navigation": "Only in NAVIGATION_TARGET_REVIEW: authorize the pending instruction and image reference unchanged after comparing the navigation model's first pointing with the intended visible object on the same source image. Instruction, target and all motion parameters must be null. No box-overlap rule establishes identity. This cannot release a human brake.",
+    "turn_observe": "Turn the body in place to inspect another direction. angle_deg is signed: positive turns LEFT, negative turns RIGHT; magnitude 10 to 180 degrees. Forward command is zero. IMU-estimated relative yaw closes the angle loop. Other motion parameters, instruction and target must be null. Images are sampled throughout the turn and returned before another decision.",
+    "advance_observe": "Make a short observation move in visually open space: speed_m_s 0.10 to 0.20, duration_s 0.5 to 4.0. No commanded yaw or lateral motion. Duration includes ramp-in; ramp-down and bounded stop observation follow. It does not certify free space or exact distance. angle_deg, instruction and target must be null. Images and executed-command evidence return to the planner.",
+    "hold_observe": "Request zero velocity for duration_s 0.5 to 4.0 while collecting images, then observe estimated stopping for up to 3 seconds. It retains an active automatic external-force stop. Zero command does not guarantee physical stillness. angle_deg, speed_m_s, instruction and target must be null.",
+    "complete": "Declare the ORIGINAL task visually fulfilled and request stopping. All motion parameters, instruction and target must be null. An observation subgoal is not the destination.",
+    "needs_user": "Report why the original task cannot be resolved with available evidence and bounded actions. All motion parameters, instruction and target must be null."
+  },
+  "observation_limits": {
+    "max_turn_angle_deg": 180.0,
+    "min_turn_angle_deg": 10.0,
+    "turn_rate_rad_s": 0.30,
+    "turn_tolerance_deg": 3.0,
+    "turn_timeout_nominal_rate_rad_s": 0.15,
+    "turn_timeout_extra_s": 4.0,
+    "min_forward_speed_m_s": 0.10,
+    "max_forward_speed_m_s": 0.20,
+    "min_duration_s": 0.5,
+    "max_duration_s": 4.0,
+    "sample_period_s": 0.5,
+    "max_contact_sheet_frames": 12,
+    "settle_timeout_s": 3.0,
+    "stable_stop_s": 0.6
+  }
+}

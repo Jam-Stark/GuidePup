@@ -1,0 +1,86 @@
+{
+  "name": "hospital_open_room_from_corridor",
+  "asset": ".local/assets/isaac/Isaac/Environments/Hospital/hospital.usd",
+  "asset_source": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Hospital/hospital.usd",
+  "spawn_xyz_yaw_deg": [
+    19.13605308532715,
+    3.904569625854492,
+    0.55,
+    10.11563556260034
+  ],
+  "goal": "穿过右侧那扇门完全打开的门口，进入房间。",
+  "semantic_classes": [
+    "door",
+    "doorframe",
+    "wall",
+    "chair",
+    "desk",
+    "toilet",
+    "cabinet"
+  ],
+  "interaction": "none",
+  "offline_evaluation": {
+    "scope": "Experiment placement and post-run scoring only; never supplied to navigation or models.",
+    "portals": [
+      {
+        "frame_prim": "/Root/Geo_M_DoorFrame26",
+        "leaf_prim": "/Root/SM_Door_02b2",
+        "native_door_pose_preserved": true,
+        "x_slab_m": [
+          20.745908,
+          20.911374
+        ],
+        "plane_x_m": 20.8,
+        "structural_clear_y_interval_at_z_0_5_m": [
+          -1.39952,
+          -0.15664
+        ],
+        "preferred_crossing_xy_m": [
+          20.8,
+          -0.8
+        ],
+        "crossing_direction": "+X",
+        "threshold_max_z_m": 0.025361,
+        "id": "room_b_entry"
+      }
+    ],
+    "destination_room": {
+      "semantic": "office room",
+      "floor_prim": "/Root/Geo_o_Floor_936",
+      "interior_xy_bounds_m": [
+        20.95,
+        25.25,
+        -4.15,
+        2.65
+      ]
+    },
+    "source_room": {
+      "semantic": "corridor at prior episode final position",
+      "placement_source": ".local/outputs/isaac_hospital_qwen_20260916_01/physical_evaluation.json",
+      "pose_world_from_previous_episode": [
+        19.13605308532715,
+        3.904569625854492,
+        0.17655114649920492
+      ],
+      "initialization": "Fresh estimator, local map and model sessions; pose used only for initial plant placement."
+    },
+    "geometry_evidence": "Full composed USD with zero missing-layer warnings; all-mesh world-space cross-section at z=0.5m. Original shipped leaves are open, no door geometry edits. Native physics groundplane at z=0, native triangle mesh collisions on architecture/props.",
+    "geometry_limits": "Candidate only: not a rendered validation, full-body swept collision proof, or successful robot execution. Main must render and confirm RGB-D/physical route before formal run. Room bounds are useful interior extents, not obstacle-free polygons."
+  },
+  "experiment": {
+    "scope": "One new Qwen task targeting the fully open adjacent room",
+    "prior_run": ".local/outputs/isaac_hospital_qwen_20260916_01",
+    "changes": [
+      "Start from prior terminal corridor pose, with fresh state and sessions",
+      "One direct enter-open-room instruction instead of multi-stage exit/corridor/enter task"
+    ],
+    "unchanged": [
+      "Native Hospital door geometry",
+      "Sensor-only state/LightNav/MPC/Monitor source",
+      "GPU0, Qwen profile, 360 s / 30 s / 3 recoveries",
+      "No force or human pause/resume"
+    ],
+    "primary_metric": "Whole configured body crosses the actual open-room doorway, stops inside destination; compare independent Monitor completion",
+    "denominator": 1
+  }
+}

@@ -1,5 +1,32 @@
 # A2 导航与力交互原型
 
+## Current default: A2 HEAD RGB + Codex + CUDA MPPI
+
+The simplified deployment entry is now `bash prototype/run.sh --output <NEW_DIRECTORY>`.
+See [the RGB-only navigation README](navigation/README.md) for configuration and verified limits.
+The new default task is **middle elevator E2 → main-lobby glass entrance A**, stopping
+approximately nearby on the indoor side. The initial heading faces along the corridor
+toward the lobby. The earlier task toward the elevator remains historical.
+
+Current data flow: **Codex GPT-6.1 Sol / medium / fast → navigation model → GPU MPPI tracking → existing A2 WBC**.
+A2 HEAD provides RGB only. IMU and joint observations feed the existing auxiliary velocity
+estimate and short-horizon dead reckoning. There is no online depth map or geometric avoidance.
+Approximate visual arrival replaces precise docking. Progress evidence is read-only.
+The navigation model stays loaded on GPU3. The first full RGB-only trial ended NEEDS_USER: 13.39 m travelled, still 13.29 m from Entrance A.
+There is no successful arrival claim; details are in the navigation README.
+
+Everything below describes earlier RGB-D experiments and their historical entrypoints.
+`prototype/isaac/run_experiment.py` is retained for explicit RGB-D reproduction;
+the old Pi stack can be addressed through `prototype/stack.py` rather than the default `run.sh`.
+
+## Previous default scene and task: campus MF-R1
+
+当前 Isaac 测试入口默认加载学校的一层＋三层 USD；默认任务为“一层起点走到中间2号电梯门前，朝门停下”。使用GPU7，导航端口8768。场景准备、实际加载验证和任务入口见 [Isaac说明](isaac/README.md) 与 [校园场景接入报告](NAVIGATION_CAMPUS_MF_R1_20261015.md)。
+
+本次已验证A2原生RTX画面、RGB-D、里程计和局部地图，未运行完整导航。几何只用于初始化和离线评分；在线导航不接收场景坐标或拓扑。跨楼层乘梯未接入。
+
+## 早期原型说明（历史参考）
+
 跨机器接续见 [迁移说明](MIGRATION.md)：代码分支、Drive 附件、环境重建和两个待完成测试的可移植入口。
 
 最新通用框架修正、原始上下文回放及运行限制见 [NAVIGATION_FRAMEWORK.md](NAVIGATION_FRAMEWORK.md)；此前YOLO与两模型72轮对照见 [NAVIGATION_YOLO.md](NAVIGATION_YOLO.md)。Owner已将本任务的当前分配更换为物理GPU0；CUDA/EGL按硬件UUID绑定。

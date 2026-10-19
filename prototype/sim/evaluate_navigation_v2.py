@@ -94,7 +94,8 @@ def full_far_jamb_crossing(rows, footprint, far_plane_y):
             "previous_clearance_m": clearances[index - 1], "observed_clearance_m": clearances[index]}
 
 
-def stage_zero_evidence(events, footprint, far_plane_y):
+def stage_zero_evidence(events, footprint, far_plane_y, physical_rows):
+    truth_at = {round(row['sim_time_s'], 8): row for row in physical_rows}
     completed = []
     for event in events:
         if event.get("kind") != "stage_completed" or event.get("data", {}).get("stageIndex") != 0:
@@ -103,6 +104,7 @@ def stage_zero_evidence(events, footprint, far_plane_y):
         if not control:
             completed.append({"seq": event.get("seq"), "status": "NOT_OBSERVED", "reason": "stage_completed has no saved control pose."})
             continue
+        control = truth_at[round(control['sim_time_s'], 8)]
         clearance = far_jamb_clearance(control["pose_world"], footprint, far_plane_y)
         completed.append({"seq": event.get("seq"), "sim_time_s": control["sim_time_s"],
                           "pose_world": control["pose_world"], "far_jamb_clearance_m": clearance,
@@ -245,26 +247,26 @@ def image_and_qwen_evidence(events, action_buffers):
 
 
 def raw_motion_evidence(raw_output, actions, motion_by_task, finish):
-    telemetry = read_jsonl(raw_output / "telemetry.jsonl") if raw_output.exists() else []
+    telemetry = read_jsonl(raw_output / "ground_truth.jsonl") if raw_output.exists() else []
     if not telemetry:
-        return missing("Raw telemetry.jsonl is unavailable.")
+        return missing("Offline ground_truth.jsonl is unavailable.")
     result = []
     for index, action in enumerate(actions):
         control_task_id = action["control_task_id"]
         decision = action["buffer"].get("decision", {})
-        start = decision.get("acceptedSimTimeS")
+        start = decision.get("acceptedStampS")
         motion = motion_by_task.get(control_task_id)
-        end = (motion or {}).get("end_sim_time_s")
+        end = (motion or {}).get("end_stamp_s")
         if end is None:
             next_action = actions[index + 1] if index + 1 < len(actions) else None
-            end = next_action["buffer"].get("decision", {}).get("acceptedSimTimeS") if next_action else finish
+            end = next_action["buffer"].get("decision", {}).get("acceptedStampS") if next_action else finish
         samples = [row for row in telemetry if start is not None and start - EPS <= row["sim_time_s"] <= end + EPS]
         if len(samples) < 2:
             result.append({"control_task_id": control_task_id, **missing("Fewer than two raw 50 Hz samples in the motion interval.")})
             continue
         raw_length = sum(math.hypot(b["pose_world"][0] - a["pose_world"][0], b["pose_world"][1] - a["pose_world"][1])
                          for a, b in zip(samples, samples[1:]))
-        actual = (motion or {}).get("actual", {})
+        actual = (motion or {}).get("estimated", {})
         result.append({"status": "OBSERVED", "control_task_id": control_task_id, "interval_s": [start, end],
                        "raw_50hz_sample_count": len(samples), "raw_50hz_path_length_m": raw_length,
                        "motion_summary_sample_count": actual.get("sample_count"),
@@ -272,7 +274,7 @@ def raw_motion_evidence(raw_output, actions, motion_by_task, finish):
                        "summary_minus_raw_path_length_m": (actual.get("path_length_m") - raw_length
                                                              if isinstance(actual.get("path_length_m"), (int, float)) else None),
                        "lightnav_plan_count": (motion or {}).get("plan_count"),
-                       "limitation": "LightNav plan chunks can overlap and are not traveled distance."})
+                       "limitation": "Summary is sensor-estimated odometry; raw length is independent offline truth. Their difference is estimation error, not a truth input. LightNav plans are not traveled distance."})
     return {"status": "OBSERVED", "per_action": result}
 
 
@@ -359,7 +361,7 @@ def evaluate(episode):
             "source_selection": {"scene": {"path": str(scene_path), "provenance": scene_source},
                                  "navigation_contract": {"path": str(contract_path), "provenance": contract_source}},
             "doorway_actual_far_jamb": full_far_jamb_crossing(rows, footprint, geometry["doorway"]["far_jamb_plane_y_m"]),
-            "stage0_actual_far_jamb": stage_zero_evidence(events, footprint, geometry["doorway"]["far_jamb_plane_y_m"]),
+            "stage0_actual_far_jamb": stage_zero_evidence(events, footprint, geometry["doorway"]["far_jamb_plane_y_m"], rows),
             "actual_elevator_stop": elevator_stop(rows[-1]["pose_world"], footprint, geometry, contract),
             "decision_buffer": {key: value for key, value in decisions.items() if key != "motion_by_control_task_id"},
             "motion_50hz_vs_summary": raw_motion_evidence(raw_output, actions, decisions.get("motion_by_control_task_id", {}), rows[-1]["sim_time_s"]),

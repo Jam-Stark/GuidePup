@@ -25,7 +25,7 @@ const HELP = `A2 navigation task monitor (Pi 0.85.1)
 
 Run/chat/monitor options:
   --db path.sqlite --log path.jsonl
-  --timeout-s 360 --decision-timeout-s 30 --max-recoveries 3
+  --decision-timeout-s 30 --max-recoveries 3
 Monitor option: --port 8770
 An explicit --log also sets the matching .sqlite path unless --db is supplied.
 The resident monitor defaults to .local/monitor/task.sqlite.
@@ -76,14 +76,13 @@ function monitorArgs(command: string, args: string[]): { options: MonitorOptions
       if (!path) throw new Error(`${arg} requires a path`);
       if (arg === "--log") { options.logPath = path; explicitLog = true; }
       else { options.dbPath = path; explicitDb = true; }
-    } else if (["--max-recoveries", "--timeout-s", "--decision-timeout-s"].includes(arg)) {
+    } else if (["--max-recoveries", "--decision-timeout-s"].includes(arg)) {
       const value = Number(args[++i]);
       const minimum = arg === "--max-recoveries" ? 0 : 1;
       if (!Number.isInteger(value) || value < minimum) {
         throw new Error(`${arg} requires ${minimum === 0 ? "a nonnegative" : "a positive"} integer`);
       }
       if (arg === "--max-recoveries") options.maxRecoveries = value;
-      else if (arg === "--timeout-s") options.timeoutS = value;
       else options.decisionTimeoutS = value;
     } else if (arg === "--port" && command === "monitor") {
       port = Number(args[++i]);

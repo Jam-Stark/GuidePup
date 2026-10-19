@@ -1,0 +1,82 @@
+{
+  "model_id": "native_hospital_sensor_stop_20260916",
+  "times_s": [
+    0.1,
+    0.2,
+    0.4,
+    0.8,
+    1.2,
+    2.0
+  ],
+  "velocity_response_time_s": [
+    0.07951805983710569,
+    0.10305072156273873,
+    0.1476872136611893
+  ],
+  "position_residual_m": [
+    0.04026835976520278,
+    0.029152858803721385,
+    0.036950049009127274,
+    0.03579461064565119,
+    0.033039279899423984,
+    0.04581513262433543
+  ],
+  "yaw_residual_rad": [
+    0.10020517265125786,
+    0.06626290056168538,
+    0.09003968078159218,
+    0.04643583037774096,
+    0.053135699563166564,
+    0.05402835367879799
+  ],
+  "residual_components": {
+    "raw_position_residual_m": [
+      0.02233371707025826,
+      0.0169075501118269,
+      0.028027514455962056,
+      0.03016151463109719,
+      0.03046464867238041,
+      0.0430390312180908
+    ],
+    "raw_yaw_residual_rad": [
+      0.043434604542986276,
+      0.0322113351879009,
+      0.03438276174417105,
+      0.03353373968531155,
+      0.047470977416565814,
+      0.051517150719877745
+    ],
+    "position_sampling_allowance_m": [
+      0.017934642694944516,
+      0.012245308691894488,
+      0.00892253455316522,
+      0.005633096014553998,
+      0.002574631227043573,
+      0.0027761014062446282
+    ],
+    "yaw_sampling_allowance_rad": [
+      0.05677056810827158,
+      0.034051565373784475,
+      0.05565691903742113,
+      0.012902090692429412,
+      0.005664722146600748,
+      0.0025112029589202433
+    ]
+  },
+  "domain": {
+    "max_speed_m_s": 0.3,
+    "max_yaw_rate_rad_s": 0.6
+  },
+  "basis": {
+    "source": ".local/outputs/native_depth_sequence_20260916/stopping_cases",
+    "case_count": 6,
+    "input": "estimated RobotState only",
+    "fitting_bounds_s": [
+      0.01,
+      5.0
+    ],
+    "residual": "maximum observed position/yaw error to forecast endpoint over its preceding interval plus raw-sensor sampling allowance",
+    "sampling_allowance": "maximum nearest-state-sample time gap times interval maximum raw estimated 3D linear speed / gyro norm, independently maximized across cases; no truth inputs",
+    "limitation": "Empirical envelope of these cases only; no all-state or hardware guarantee."
+  }
+}

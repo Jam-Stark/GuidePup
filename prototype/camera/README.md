@@ -1,6 +1,14 @@
 # Prototype 相机配置
 
-2026-09-14 当前默认恢复为 `d435i_rgb_nominal`，开启同帧 RGB-D。LightNav 接收原始 RGB；Pi 接收 Depth 翻译器的编号图、分层距离和按需 ROI；MPC 使用独立的局部深度障碍地图。深度接口与实机对齐要求见 [DEPTH_TRANSLATOR.md](DEPTH_TRANSLATOR.md)。
+2026-10-15: the current default is **`a2_head_isaaclab`, RGB only**, selected by the simplified
+[navigation entry](../navigation/README.md). It creates no depth render product. GPU MPPI
+tracks the navigation model's local path; there is no geometric depth-map avoidance.
+The existing HEAD mount/FOV/raster are retained simulation parameters; real camera
+streaming, intrinsics and distortion still need hardware verification. No real robot was operated.
+
+The sections below preserve the earlier camera investigation and RGB-D experiment history.
+
+2026-09-14 历史默认为 `d435i_rgb_nominal`，开启同帧 RGB-D。深度接口与实机对齐要求见 [DEPTH_TRANSLATOR.md](DEPTH_TRANSLATOR.md)。
 
 ## 当前 D435i RGB-D 配置
 
